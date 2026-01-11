@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Telegram Unified System</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f7fa; padding: 20px; }
+        .container { max-width: 1600px; margin: 0 auto; }
+        header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; }
+        header h1 { font-size: 28px; margin-bottom: 10px; }
+        
+        .webhook-instructions { background: #fff3cd; padding: 20px; border-radius: 10px; margin-bottom: 30px; border-left: 4px solid #ffc107; }
+        .webhook-instructions h3 { margin-bottom: 15px; }
+        .instruction-box { background: white; padding: 15px; border-radius: 8px; margin: 10px 0; }
+        .code-box { background: #2d2d2d; color: #0f0; padding: 10px; border-radius: 6px; margin-top: 8px; font-family: monospace; font-size: 13px; }
+        
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .stat-card h3 { color: #666; font-size: 14px; margin-bottom: 10px; }
+        .stat-card .number { font-size: 32px; font-weight: bold; color: #667eea; }
+        
+        .groups-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .group-section { background: white; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden; }
+        .group-section.disabled { opacity: 0.6; }
+        .group-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; }
+        .group-header h2 { margin-bottom: 10px; }
+        .group-header .keywords { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+        .keyword-tag { background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 15px; font-size: 12px; }
+        
+        .group-content { padding: 20px; }
+        .tab-buttons { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; }
+        .tab-btn { padding: 10px 20px; background: none; border: none; cursor: pointer; color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+        .tab-btn.active { color: #667eea; border-bottom-color: #667eea; font-weight: bold; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        .btn { padding: 8px 15px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-warning { background: #ffc107; color: white; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
+        
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; font-weight: 600; }
+        
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal-content { background: white; max-width: 500px; margin: 100px auto; padding: 30px; border-radius: 10px; }
+        .close { float: right; font-size: 28px; cursor: pointer; color: #aaa; }
+        
+        input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: 500; }
+        
+        .empty-state { text-align: center; padding: 40px; color: #999; }
+        .status-active { color: #28a745; font-weight: bold; }
+        .status-joined { color: #28a745; }
+        .status-pending { color: #ffc107; }
+        
+        .all-messages-section { background: white; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 30px; }
+        .all-messages-header { background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📱 Telegram Unified System</h1>
+            <p>User Management + Message Routing</p>
+        </header>
+        
+        <div class="webhook-instructions">
+            <h3>📡 Webhook Setup Instructions</h3>
+            <div class="instruction-box">
+                <strong>Step 1: Get your HTTPS URL</strong>
+                <div class="code-box">
+                    # Terminal 1: Run backend<br>
+                    python backend.py<br><br>
+                    # Terminal 2: Create tunnel (for local testing)<br>
+                    lt --port 5000 --subdomain mywebhook<br><br>
+                    # OR deploy to Railway/Render and get production URL
+                </div>
+            </div>
+            <div class="instruction-box">
+                <strong>Step 2: Your Webhook URL (use in TradingView)</strong>
+                <div class="code-box" id="webhookUrl">
+                    https://your-domain.com/webhook/router
+                </div>
+                <small style="display: block; margin-top: 8px; color: #666;">
+                    👆 Replace with your actual domain after deployment
+                </small>
+            </div>
+            <div class="instruction-box">
+                <strong>Step 3: TradingView Alert Message Format</strong>
+                <ul style="margin: 10px 0 0 20px; line-height: 1.8;">
+                    <li><strong>Zone Signals:</strong> Include <code>[ZONE]</code> in message</li>
+                    <li><strong>Example:</strong> <code>{{ticker}} signal [ZONE] at {{close}}</code></li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <h3>Total Users</h3>
+                <div class="number" id="statUsers">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Active Users</h3>
+                <div class="number" id="statActive">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Messages Sent</h3>
+                <div class="number" id="statMessages">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Active Groups</h3>
+                <div class="number" id="statGroups">-</div>
+            </div>
+        </div>
+        
+        <div class="all-messages-section">
+            <div class="all-messages-header">
+                <h2>📊 All Messages</h2>
+                <p>Messages sent to all groups</p>
+            </div>
+            <div class="group-content">
+                <button class="btn btn-success" onclick="loadAllMessages()">🔄 Refresh</button>
+                <table style="margin-top: 20px;">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Message</th>
+                            <th>Group</th>
+                            <th>Keyword</th>
+                        </tr>
+                    </thead>
+                    <tbody id="allMessagesTable">
+                        <tr><td colspan="4" style="text-align: center;">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="groups-grid" id="groupsGrid">
+            Loading groups...
+        </div>
+    </div>
+    
+    <!-- Add User Modal -->
+    <div id="addUserModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('addUserModal')">&times;</span>
+            <h2 id="modalTitle">Add User</h2>
+            <label>User Telegram ID</label>
+            <input type="text" id="newUserId" placeholder="123456789">
+            <label>Days Valid</label>
+            <input type="number" id="newUserDays" value="30">
+            <button class="btn btn-primary" onclick="addUser()">Add User</button>
+        </div>
+    </div>
+    
+    <script>
+        // API Base URL - change this for deployment
+        const API_BASE = window.location.origin;
+        let ADMIN_ID = '';
+        let currentGroupId = null;
+        
+        // Load config first
+        fetch(`${API_BASE}/api/config`)
+            .then(r => r.json())
+            .then(data => {
+                ADMIN_ID = data.admin_id;
+                initializeDashboard();
+            });
+        
+        function initializeDashboard() {
+            loadStats();
+            loadGroups();
+            loadAllMessages();
+            
+            // Auto-refresh every 30 seconds
+            setInterval(() => {
+                loadStats();
+                loadAllMessages();
+            }, 30000);
+        }
+        
+        function loadStats() {
+            fetch(`${API_BASE}/api/stats`)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('statUsers').textContent = data.total_users;
+                    document.getElementById('statActive').textContent = data.active_users;
+                    document.getElementById('statMessages').textContent = data.total_messages;
+                    document.getElementById('statGroups').textContent = data.enabled_groups;
+                });
+        }
+        
+        function loadGroups() {
+            fetch(`${API_BASE}/api/groups`)
+                .then(r => r.json())
+                .then(data => {
+                    const grid = document.getElementById('groupsGrid');
+                    
+                    grid.innerHTML = data.groups.map(g => `
+                        <div class="group-section ${g.enabled ? '' : 'disabled'}">
+                            <div class="group-header">
+                                <h2>${g.name} ${g.enabled ? '✅' : '⏸️'}</h2>
+                                <p>Group ID: <code>${g.group_id}</code></p>
+                                <div class="keywords">
+                                    ${g.keywords.map(k => `<span class="keyword-tag">${k}</span>`).join('')}
+                                </div>
+                            </div>
+                            <div class="group-content">
+                                ${g.enabled ? `
+                                    <div class="tab-buttons">
+                                        <button class="tab-btn active" onclick="switchTab('${g.key}', 'users')">👥 Users</button>
+                                        <button class="tab-btn" onclick="switchTab('${g.key}', 'messages')">💬 Messages</button>
+                                    </div>
+                                    
+                                    <div id="${g.key}-users" class="tab-content active">
+                                        <button class="btn btn-primary" onclick="showAddUserModal('${g.group_id}', '${g.name}')">+ Add User</button>
+                                        
+                                        <h3 style="margin-top: 30px; margin-bottom: 15px; color: #667eea;">👨‍💼 Group Admins (Always Visible)</h3>
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>User ID</th>
+                                                    <th>Name</th>
+                                                    <th>Username</th>
+                                                    <th>Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="${g.key}-admins-table">
+                                                <tr><td colspan="4" style="text-align: center;">Loading...</td></tr>
+                                            </tbody>
+                                        </table>
+                                        
+                                        <h3 style="margin-top: 30px; margin-bottom: 15px; color: #667eea;">👥 Tracked Users (Added via System)</h3>
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>User ID</th>
+                                                    <th>Name</th>
+                                                    <th>Invited</th>
+                                                    <th>Expires</th>
+                                                    <th>Days Left</th>
+                                                    <th>Status</th>
+                                                    <th>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="${g.key}-users-table">
+                                                <tr><td colspan="7" style="text-align: center;">Loading...</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    
+                                    <div id="${g.key}-messages" class="tab-content">
+                                        <button class="btn btn-success" onclick="loadGroupMessages('${g.group_id}', '${g.key}')">🔄 Refresh</button>
+                                        <table style="margin-top: 20px;">
+                                            <thead>
+                                                <tr>
+                                                    <th>Time</th>
+                                                    <th>Message</th>
+                                                    <th>Keyword</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="${g.key}-messages-table">
+                                                <tr><td colspan="3" style="text-align: center;">Loading...</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ` : `
+                                    <div class="empty-state">
+                                        <p>⏸️ This group is disabled</p>
+                                        <p>Enable it in backend.py to start using</p>
+                                    </div>
+                                `}
+                            </div>
+                        </div>
+                    `).join('');
+                    
+                    // Load data for enabled groups
+                    data.groups.filter(g => g.enabled).forEach(g => {
+                        loadGroupUsers(g.group_id, g.key);
+                        loadGroupMessages(g.group_id, g.key);
+                    });
+                });
+        }
+        
+        function loadGroupUsers(groupId, groupKey) {
+            // Load admins
+            fetch(`${API_BASE}/api/group/${groupId}/admins`)
+                .then(r => r.json())
+                .then(data => {
+                    const table = document.getElementById(`${groupKey}-admins-table`);
+                    
+                    if (data.admins && data.admins.length > 0) {
+                        table.innerHTML = data.admins.map(a => `
+                            <tr>
+                                <td><code>${a.user_id}</code></td>
+                                <td>${a.first_name}</td>
+                                <td>${a.username ? '@' + a.username : '-'}</td>
+                                <td><strong style="color: #667eea;">${a.status.toUpperCase()}</strong></td>
+                            </tr>
+                        `).join('');
+                    } else {
+                        table.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">No admins found</td></tr>';
+                    }
+                });
+            
+            // Load tracked users
+            fetch(`${API_BASE}/api/group/${groupId}/users`)
+                .then(r => r.json())
+                .then(data => {
+                    const table = document.getElementById(`${groupKey}-users-table`);
+                    
+                    if (data.users.length === 0) {
+                        table.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No users yet</td></tr>';
+                        return;
+                    }
+                    
+                    table.innerHTML = data.users.map(u => `
+                        <tr>
+                            <td><code>${u.user_id}</code></td>
+                            <td>${u.name}</td>
+                            <td>${u.invited_date}</td>
+                            <td>${u.expiry_date}</td>
+                            <td>${u.days_left} days</td>
+                            <td>
+                                <span class="${u.joined ? 'status-joined' : 'status-pending'}">
+                                    ${u.joined ? '✓ Joined' : '⏳ Pending'}
+                                </span>
+                            </td>
+                            <td>
+                                ${u.joined ? `
+                                    <button class="btn btn-warning btn-sm" onclick="extendUser('${groupId}', '${u.user_id}')">Extend</button>
+                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')">Remove</button>
+                                ` : `
+                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')">Cancel</button>
+                                `}
+                            </td>
+                        </tr>
+                    `).join('');
+                });
+        }
+        
+        function loadGroupMessages(groupId, groupKey) {
+            fetch(`${API_BASE}/api/group/${groupId}/messages?limit=20`)
+                .then(r => r.json())
+                .then(data => {
+                    const table = document.getElementById(`${groupKey}-messages-table`);
+                    
+                    if (data.messages.length === 0) {
+                        table.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #999;">No messages yet</td></tr>';
+                        return;
+                    }
+                    
+                    table.innerHTML = data.messages.map(m => `
+                        <tr>
+                            <td>${m.timestamp}</td>
+                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${m.message}</td>
+                            <td><code>${m.keywords}</code></td>
+                        </tr>
+                    `).join('');
+                });
+        }
+        
+        function loadAllMessages() {
+            fetch(`${API_BASE}/api/messages?limit=50`)
+                .then(r => r.json())
+                .then(data => {
+                    const table = document.getElementById('allMessagesTable');
+                    
+                    if (data.messages.length === 0) {
+                        table.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">No messages yet</td></tr>';
+                        return;
+                    }
+                    
+                    table.innerHTML = data.messages.map(m => `
+                        <tr>
+                            <td>${m.timestamp}</td>
+                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${m.message}</td>
+                            <td>${m.group_name}</td>
+                            <td><code>${m.keywords}</code></td>
+                        </tr>
+                    `).join('');
+                });
+        }
+        
+        function switchTab(groupKey, tab) {
+            document.querySelectorAll(`#${groupKey}-users, #${groupKey}-messages`).forEach(el => el.classList.remove('active'));
+            document.getElementById(`${groupKey}-${tab}`).classList.add('active');
+            
+            event.target.parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+        
+        function showAddUserModal(groupId, groupName) {
+            currentGroupId = groupId;
+            document.getElementById('modalTitle').textContent = `Add User to ${groupName}`;
+            document.getElementById('addUserModal').style.display = 'block';
+        }
+        
+        function closeModal(id) {
+            document.getElementById(id).style.display = 'none';
+        }
+        
+        function addUser() {
+            const userId = document.getElementById('newUserId').value.trim();
+            const days = document.getElementById('newUserDays').value;
+            
+            if (!userId) {
+                alert('Please enter User ID');
+                return;
+            }
+            
+            fetch(`${API_BASE}/api/user/add`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    admin_id: ADMIN_ID,
+                    group_id: currentGroupId,
+                    user_id: userId,
+                    days: days
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('User added! Invite link sent via Telegram.');
+                    closeModal('addUserModal');
+                    document.getElementById('newUserId').value = '';
+                    loadGroups();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            });
+        }
+        
+        function extendUser(groupId, userId) {
+            const days = prompt('Extend by how many days?', '30');
+            if (!days) return;
+            
+            fetch(`${API_BASE}/api/user/extend`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    admin_id: ADMIN_ID,
+                    group_id: groupId,
+                    user_id: userId,
+                    days: parseInt(days)
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`Extended by ${days} days!`);
+                    loadGroups();
+                }
+            });
+        }
+        
+        function removeUser(groupId, userId) {
+            if (!confirm('Remove this user from group and database?')) return;
+            
+            fetch(`${API_BASE}/api/user/remove`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    admin_id: ADMIN_ID,
+                    group_id: groupId,
+                    user_id: userId
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('User removed!');
+                    loadGroups();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
