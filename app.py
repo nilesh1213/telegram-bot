@@ -51,14 +51,14 @@ GROUPS = {
     'INDEX': {
         'name': 'Index Option Buying',
         'group_id': os.environ.get('INDEX_GROUP_ID', '-5286555501'),
-        'keywords': ['option'],
-        'enabled': True
+        'keywords': ['INDEX', 'NIFTY', 'BANKNIFTY'],
+        'enabled': False
     },
     'COMMODITY': {
         'name': 'Commodity',
         'group_id': os.environ.get('COMMODITY_GROUP_ID', '-5052531894'),
         'keywords': ['COMMODITY', 'GOLD', 'CRUDE'],
-        'enabled': True
+        'enabled': False
     }
 }
 
@@ -72,9 +72,8 @@ def get_db_connection():
         import sqlite3
         return sqlite3.connect(DATABASE_URL, check_same_thread=False)
     elif DATABASE_TYPE == 'postgresql':
-        import psycopg2
-        import psycopg2.extras
-        return psycopg2.connect(DATABASE_URL)
+        import psycopg
+        return psycopg.connect(DATABASE_URL)
     elif DATABASE_TYPE == 'mysql':
         import mysql.connector
         from urllib.parse import urlparse
