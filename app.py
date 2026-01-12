@@ -37,6 +37,89 @@ ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID', "8363089809")
 DATABASE_TYPE = os.environ.get('DATABASE_TYPE', 'sqlite')  # sqlite, postgresql, mysql
 DATABASE_URL = os.environ.get('DATABASE_URL', 'unified_system.db')
 
+# Initialize database on startup (runs once when module is imported)
+def _init_db_on_startup():
+    """Initialize database tables when app starts"""
+    try:
+        from contextlib import contextmanager
+        
+        @contextmanager
+        def get_connection():
+            if DATABASE_TYPE == 'sqlite':
+                import sqlite3
+                conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
+            elif DATABASE_TYPE == 'postgresql':
+                import psycopg
+                conn = psycopg.connect(DATABASE_URL)
+            else:
+                return
+            try:
+                yield conn
+                conn.commit()
+            finally:
+                conn.close()
+        
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            
+            if DATABASE_TYPE == 'sqlite':
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id TEXT,
+                        group_id TEXT,
+                        name TEXT,
+                        invited_date TEXT,
+                        expiry_date TEXT,
+                        days_left INTEGER,
+                        status TEXT,
+                        PRIMARY KEY (user_id, group_id)
+                    )
+                ''')
+                
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT,
+                        message TEXT,
+                        group_id TEXT,
+                        group_name TEXT,
+                        matched_keywords TEXT
+                    )
+                ''')
+            
+            elif DATABASE_TYPE == 'postgresql':
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id VARCHAR(100),
+                        group_id VARCHAR(100),
+                        name VARCHAR(200),
+                        invited_date VARCHAR(50),
+                        expiry_date VARCHAR(50),
+                        days_left INTEGER,
+                        status VARCHAR(20),
+                        PRIMARY KEY (user_id, group_id)
+                    )
+                ''')
+                
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS messages (
+                        id SERIAL PRIMARY KEY,
+                        timestamp VARCHAR(50),
+                        message TEXT,
+                        group_id VARCHAR(100),
+                        group_name VARCHAR(200),
+                        matched_keywords VARCHAR(200)
+                    )
+                ''')
+            
+            conn.commit()
+            print("✅ Database tables initialized successfully")
+    except Exception as e:
+        print(f"⚠️  Database initialization error: {e}")
+
+# Run initialization
+_init_db_on_startup()
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 📋 PREDEFINED GROUPS WITH KEYWORDS
 # ═══════════════════════════════════════════════════════════════════════════
