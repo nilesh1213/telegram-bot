@@ -51,7 +51,7 @@ GROUPS = {
     'INDEX': {
         'name': 'Index Option Buying',
         'group_id': os.environ.get('INDEX_GROUP_ID', '-5286555501'),
-        'keywords': ['Option'],
+        'keywords': ['OPTION'],
         'enabled': True
     },
     'COMMODITY': {
