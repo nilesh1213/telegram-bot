@@ -778,6 +778,84 @@ def health():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'database': DATABASE_TYPE}), 200
 
+@app.route('/init', methods=['GET'])
+def init_tables():
+    """Manual database initialization - visit this URL once to create tables"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        if DATABASE_TYPE == 'postgresql':
+            # Create users table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id VARCHAR(100),
+                    group_id VARCHAR(100),
+                    name VARCHAR(200),
+                    invited_date VARCHAR(50),
+                    expiry_date VARCHAR(50),
+                    days_left INTEGER,
+                    status VARCHAR(20),
+                    PRIMARY KEY (user_id, group_id)
+                )
+            ''')
+            
+            # Create messages table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS messages (
+                    id SERIAL PRIMARY KEY,
+                    timestamp VARCHAR(50),
+                    message TEXT,
+                    group_id VARCHAR(100),
+                    group_name VARCHAR(200),
+                    matched_keywords VARCHAR(200)
+                )
+            ''')
+        
+        elif DATABASE_TYPE == 'sqlite':
+            # Create users table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id TEXT,
+                    group_id TEXT,
+                    name TEXT,
+                    invited_date TEXT,
+                    expiry_date TEXT,
+                    days_left INTEGER,
+                    status TEXT,
+                    PRIMARY KEY (user_id, group_id)
+                )
+            ''')
+            
+            # Create messages table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    message TEXT,
+                    group_id TEXT,
+                    group_name TEXT,
+                    matched_keywords TEXT
+                )
+            ''')
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'status': 'success',
+            'message': '✅ Database tables created successfully!',
+            'database_type': DATABASE_TYPE,
+            'tables_created': ['users', 'messages']
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'❌ Failed to create tables: {str(e)}',
+            'database_type': DATABASE_TYPE
+        }), 500
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 🚀 STARTUP
 # ═══════════════════════════════════════════════════════════════════════════
