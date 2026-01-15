@@ -2,11 +2,11 @@
 ═══════════════════════════════════════════════════════════════════════════
     TELEGRAM UNIFIED SYSTEM - BACKEND WITH BUFFER VISIBILITY
     
-    New Features:
-    - Real-time buffer status API
-    - Separate tracking of buffered vs sent messages
-    - Message batching with 1-minute cycles
-    - Anti-spam delays between groups
+    RENDER DEPLOYMENT READY
+    - PostgreSQL primary database
+    - SQLite fallback for local testing
+    - Environment variable configuration
+    - Production-ready error handling
 ═══════════════════════════════════════════════════════════════════════════
 """
 
@@ -29,12 +29,24 @@ CORS(app)
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', "8435296160:AAGERJ9ZGwlgR578OUcil84wrGLVrb8Ej7A")
 ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID', "8363089809")
 
-# Database Configuration - Use absolute path
-import sys
-from pathlib import Path
-BASE_DIR = Path(__file__).resolve().parent
-DATABASE_TYPE = os.environ.get('DATABASE_TYPE', 'sqlite')
-DATABASE_URL = os.environ.get('DATABASE_URL', str(BASE_DIR / 'unified_system.db'))
+# Database Configuration - Auto-detect from environment
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+if DATABASE_URL:
+    # Render/Production: Use PostgreSQL
+    # Fix for SQLAlchemy 1.4+ compatibility
+    if DATABASE_URL.startswith('postgres://'):
+        DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+    DATABASE_TYPE = 'postgresql'
+    print("🗄️  Using PostgreSQL (Production)")
+else:
+    # Local: Use SQLite
+    import sys
+    from pathlib import Path
+    BASE_DIR = Path(__file__).resolve().parent
+    DATABASE_URL = str(BASE_DIR / 'unified_system.db')
+    DATABASE_TYPE = 'sqlite'
+    print("🗄️  Using SQLite (Local Development)")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 📋 PREDEFINED GROUPS WITH KEYWORDS
@@ -153,6 +165,7 @@ def _init_db_on_startup():
             print("✅ Database tables initialized successfully")
     except Exception as e:
         print(f"⚠️  Database initialization error: {e}")
+        print(f"    This is OK for local testing without database")
 
 _init_db_on_startup()
 
@@ -702,4 +715,4 @@ if __name__ == '__main__':
     print("═" * 70 + "\n")
     
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False) 
+    app.run(host='0.0.0.0', port=port, debug=False)
