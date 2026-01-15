@@ -84,8 +84,8 @@ def _init_db_on_startup():
                 import sqlite3
                 conn = sqlite3.connect(DATABASE_URL, check_same_thread=False)
             elif DATABASE_TYPE == 'postgresql':
-                import psycopg
-                conn = psycopg.connect(DATABASE_URL)
+                import psycopg2
+                conn = psycopg2.connect(DATABASE_URL)
             else:
                 return
             try:
@@ -166,8 +166,8 @@ def get_db_connection():
         import sqlite3
         return sqlite3.connect(DATABASE_URL, check_same_thread=False)
     elif DATABASE_TYPE == 'postgresql':
-        import psycopg
-        return psycopg.connect(DATABASE_URL)
+        import psycopg2
+        return psycopg2.connect(DATABASE_URL)
     else:
         raise ValueError(f"Unsupported database type: {DATABASE_TYPE}")
 
