@@ -34,7 +34,6 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 
 if DATABASE_URL:
     # Render/Production: Use PostgreSQL
-    # Fix for SQLAlchemy 1.4+ compatibility
     if DATABASE_URL.startswith('postgres://'):
         DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
     DATABASE_TYPE = 'postgresql'
@@ -77,15 +76,94 @@ GROUPS = {
 # 🎯 MESSAGE BUFFER (In-Memory Storage)
 # ═══════════════════════════════════════════════════════════════════════════
 
-message_buffer = defaultdict(list)  # {group_id: [messages]}
+message_buffer = defaultdict(list)
 buffer_lock = threading.Lock()
 last_batch_time = datetime.now()
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 💾 DATABASE CONNECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_db_connection():
+    """Get database connection based on DATABASE_TYPE"""
+    if DATABASE_TYPE == 'sqlite':
+        import sqlite3
+        return sqlite3.connect(DATABASE_URL, check_same_thread=False)
+    elif DATABASE_TYPE == 'postgresql':
+        import psycopg2
+        return psycopg2.connect(DATABASE_URL)
+    else:
+        raise ValueError(f"Unsupported database type: {DATABASE_TYPE}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 💾 DATABASE INITIALIZATION
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _init_db_on_startup()
+def _init_db_on_startup():
+    """Initialize database tables when app starts"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        if DATABASE_TYPE == 'sqlite':
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id TEXT,
+                    group_id TEXT,
+                    name TEXT,
+                    invited_date TEXT,
+                    expiry_date TEXT,
+                    days_left INTEGER,
+                    status TEXT,
+                    PRIMARY KEY (user_id, group_id)
+                )
+            ''')
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    message TEXT,
+                    group_id TEXT,
+                    group_name TEXT,
+                    matched_keywords TEXT,
+                    status TEXT DEFAULT 'sent'
+                )
+            ''')
+        
+        elif DATABASE_TYPE == 'postgresql':
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id VARCHAR(100),
+                    group_id VARCHAR(100),
+                    name VARCHAR(200),
+                    invited_date VARCHAR(50),
+                    expiry_date VARCHAR(50),
+                    days_left INTEGER,
+                    status VARCHAR(20),
+                    PRIMARY KEY (user_id, group_id)
+                )
+            ''')
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS messages (
+                    id SERIAL PRIMARY KEY,
+                    timestamp VARCHAR(50),
+                    message TEXT,
+                    group_id VARCHAR(100),
+                    group_name VARCHAR(200),
+                    matched_keywords VARCHAR(200),
+                    status VARCHAR(20) DEFAULT 'sent'
+                )
+            ''')
+        
+        conn.commit()
+        conn.close()
+        print("✅ Database tables initialized successfully")
+    except Exception as e:
+        print(f"⚠️  Database initialization error: {e}")
+
+_init_db_on_startup()
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔧 AUTO-FIX DATABASE SCHEMA
@@ -105,11 +183,10 @@ def auto_fix_schema():
         
         conn.close()
     except Exception as e:
-        print(f"❌ Schema auto-fix FAILED: {e}"))
+        print(f"❌ Schema auto-fix FAILED: {e}")
 
-# Run auto-fix on startup
 auto_fix_schema()
-    """Initialize database tables when app starts"""
+"""Initialize database tables when app starts"""
     try:
         from contextlib import contextmanager
         
