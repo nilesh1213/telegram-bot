@@ -158,7 +158,8 @@ def get_db_connection():
     elif DATABASE_TYPE == 'postgresql':
         import psycopg2
         import psycopg2.extras
-        return psycopg2.connect(DATABASE_URL)
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        return conn
     else:
         raise ValueError(f"Unsupported database type: {DATABASE_TYPE}")
 
@@ -201,8 +202,8 @@ def init_database():
                 user_id VARCHAR(100),
                 group_id VARCHAR(100),
                 name VARCHAR(200),
-                invited_date VARCHAR(50),
-                expiry_date VARCHAR(50),
+                invited_date TIMESTAMP,
+                expiry_date TIMESTAMP,
                 days_left INTEGER,
                 status VARCHAR(20),
                 PRIMARY KEY (user_id, group_id)
@@ -213,7 +214,7 @@ def init_database():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS messages (
                 id SERIAL PRIMARY KEY,
-                timestamp VARCHAR(50),
+                timestamp TIMESTAMP,
                 message TEXT,
                 group_id VARCHAR(100),
                 group_name VARCHAR(200),
@@ -351,17 +352,19 @@ def add_user(group_id, user_id, days):
     cursor = conn.cursor()
     
     name = get_user_info(user_id)
-    invited_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    expiry_date = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
-    
-    placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
+    invited_date = datetime.now()
+    expiry_date = datetime.now() + timedelta(days=days)
     
     if DATABASE_TYPE == 'sqlite':
-        cursor.execute(f'''
+        invited_date_str = invited_date.strftime('%Y-%m-%d %H:%M:%S')
+        expiry_date_str = expiry_date.strftime('%Y-%m-%d %H:%M:%S')
+        
+        cursor.execute('''
             INSERT OR REPLACE INTO users 
             (user_id, group_id, name, invited_date, expiry_date, days_left, status)
-            VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, 'active')
-        ''', (user_id, group_id, name, invited_date, expiry_date, days))
+            VALUES (?, ?, ?, ?, ?, ?, 'active')
+        ''', (user_id, group_id, name, invited_date_str, expiry_date_str, days))
+        
     elif DATABASE_TYPE == 'postgresql':
         cursor.execute('''
             INSERT INTO users 
@@ -405,9 +408,14 @@ def update_user_expiry(group_id, user_id, additional_days):
     
     result = cursor.fetchone()
     if result:
-        current_expiry = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
-        new_expiry = current_expiry + timedelta(days=additional_days)
-        new_expiry_str = new_expiry.strftime('%Y-%m-%d %H:%M:%S')
+        if DATABASE_TYPE == 'sqlite':
+            current_expiry = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
+            new_expiry = current_expiry + timedelta(days=additional_days)
+            new_expiry_str = new_expiry.strftime('%Y-%m-%d %H:%M:%S')
+        else:  # postgresql
+            current_expiry = result[0]
+            new_expiry = current_expiry + timedelta(days=additional_days)
+            new_expiry_str = new_expiry
         
         cursor.execute(f'''
             UPDATE users
@@ -435,13 +443,19 @@ def log_message(message, group_id, group_name, matched_keywords):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = datetime.now()
     
-    placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
-    cursor.execute(f'''
-        INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords)
-        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
-    ''', (timestamp, message, group_id, group_name, matched_keywords))
+    if DATABASE_TYPE == 'sqlite':
+        timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute('''
+            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (timestamp_str, message, group_id, group_name, matched_keywords))
+    elif DATABASE_TYPE == 'postgresql':
+        cursor.execute('''
+            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (timestamp, message, group_id, group_name, matched_keywords))
     
     conn.commit()
     conn.close()
@@ -613,8 +627,14 @@ def api_all_messages():
     
     result = []
     for timestamp, message, group_name, keywords in messages:
+        # Format timestamp for display
+        if DATABASE_TYPE == 'postgresql':
+            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if isinstance(timestamp, datetime) else str(timestamp)
+        else:
+            timestamp_str = timestamp
+            
         result.append({
-            'timestamp': timestamp,
+            'timestamp': timestamp_str,
             'message': message,
             'group_name': group_name,
             'keywords': keywords,
@@ -648,11 +668,19 @@ def api_group_users(group_id):
     for user_id, name, invited, expiry, days, status in users:
         joined = check_user_in_group(group_id, user_id)
         
+        # Format dates for display
+        if DATABASE_TYPE == 'postgresql':
+            invited_str = invited.strftime('%Y-%m-%d %H:%M:%S') if isinstance(invited, datetime) else str(invited)
+            expiry_str = expiry.strftime('%Y-%m-%d %H:%M:%S') if isinstance(expiry, datetime) else str(expiry)
+        else:
+            invited_str = invited
+            expiry_str = expiry
+        
         result.append({
             'user_id': user_id,
             'name': name,
-            'invited_date': invited,
-            'expiry_date': expiry,
+            'invited_date': invited_str,
+            'expiry_date': expiry_str,
             'days_left': days,
             'status': status,
             'joined': joined
@@ -674,8 +702,14 @@ def api_group_messages(group_id):
     
     result = []
     for timestamp, message, keywords in messages:
+        # Format timestamp for display
+        if DATABASE_TYPE == 'postgresql':
+            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if isinstance(timestamp, datetime) else str(timestamp)
+        else:
+            timestamp_str = timestamp
+            
         result.append({
-            'timestamp': timestamp,
+            'timestamp': timestamp_str,
             'message': message,
             'keywords': keywords
         })
