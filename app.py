@@ -118,7 +118,7 @@ def auto_fix_schema():
         print(f"⚠️  Schema auto-fix skipped: {e}")
 
 # Run auto-fix on startup
-auto_fix_schema():
+auto_fix_schema()
     """Initialize database tables when app starts"""
     try:
         from contextlib import contextmanager
