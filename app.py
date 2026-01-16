@@ -33,23 +33,30 @@ CORS(app)
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', "8435296160:AAGERJ9ZGwlgR578OUcil84wrGLVrb8Ej7A")
 ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID', "8363089809")
 
-# Database Configuration - Force SQLite for local use
-# Set USE_LOCAL_SQLITE = True to use SQLite regardless of environment variables
-USE_LOCAL_SQLITE = True
+# Database Configuration - Check environment variable first
+# Set USE_LOCAL_SQLITE=False in production (Render/Railway)
+# Set USE_LOCAL_SQLITE=True for local development
+USE_LOCAL_SQLITE = os.environ.get('USE_LOCAL_SQLITE', 'True').lower() == 'true'
 
 if USE_LOCAL_SQLITE:
     DATABASE_TYPE = 'sqlite'
     DATABASE_URL = 'unified_system.db'
-    print("🔧 Using LOCAL SQLite database (ignoring environment variables)")
+    print("🔧 Using LOCAL SQLite database")
 else:
-    DATABASE_TYPE = os.environ.get('DATABASE_TYPE', 'sqlite')
-    DATABASE_URL = os.environ.get('DATABASE_URL', 'unified_system.db')
+    DATABASE_TYPE = os.environ.get('DATABASE_TYPE', 'postgresql')
+    DATABASE_URL = os.environ.get('DATABASE_URL', '')
     
-    # If PostgreSQL URL provided, auto-detect
-    if 'postgres://' in DATABASE_URL or 'postgresql://' in DATABASE_URL:
-        DATABASE_TYPE = 'postgresql'
-        if DATABASE_URL.startswith('postgres://'):
-            DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+    if not DATABASE_URL:
+        print("⚠️ DATABASE_URL not set, falling back to SQLite")
+        DATABASE_TYPE = 'sqlite'
+        DATABASE_URL = 'unified_system.db'
+    else:
+        # If PostgreSQL URL provided, auto-detect
+        if 'postgres://' in DATABASE_URL or 'postgresql://' in DATABASE_URL:
+            DATABASE_TYPE = 'postgresql'
+            if DATABASE_URL.startswith('postgres://'):
+                DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+        print(f"🔧 Using {DATABASE_TYPE.upper()} database from environment")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 📋 GROUPS CONFIGURATION
