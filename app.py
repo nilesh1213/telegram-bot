@@ -64,25 +64,34 @@ def add_to_buffer(group_id, group_name, message, keyword):
 
 def process_buffer():
     global last_batch_time
+    print("🔄 Buffer thread starting...")
     while True:
-        time.sleep(60)
-        buffer_snapshot = {}
-        with buffer_lock:
-            if message_buffer:
-                for gid, msgs in message_buffer.items():
-                    if msgs:
-                        buffer_snapshot[gid] = msgs.copy()
-                message_buffer.clear()
-        if buffer_snapshot:
-            for idx, (gid, msgs) in enumerate(buffer_snapshot.items()):
-                combined = "\n\n\n".join([m['message'] for m in msgs])
-                if send_to_telegram(gid, combined):
-                    log_message(combined, gid, msgs[0]['group_name'], ", ".join(set([m['keyword'] for m in msgs])))
-                if idx < len(buffer_snapshot) - 1:
-                    time.sleep(10)
-            last_batch_time = datetime.now()
+        try:
+            time.sleep(60)
+            print("⏰ Buffer cycle - checking for messages...")
+            buffer_snapshot = {}
+            with buffer_lock:
+                if message_buffer:
+                    for gid, msgs in message_buffer.items():
+                        if msgs:
+                            buffer_snapshot[gid] = msgs.copy()
+                    message_buffer.clear()
+            if buffer_snapshot:
+                print(f"📤 Sending {len(buffer_snapshot)} group(s)")
+                for idx, (gid, msgs) in enumerate(buffer_snapshot.items()):
+                    combined = "\n\n\n".join([m['message'] for m in msgs])
+                    if send_to_telegram(gid, combined):
+                        log_message(combined, gid, msgs[0]['group_name'], ", ".join(set([m['keyword'] for m in msgs])))
+                        print(f"✅ Sent to {msgs[0]['group_name']}")
+                    if idx < len(buffer_snapshot) - 1:
+                        time.sleep(10)
+                last_batch_time = datetime.now()
+        except Exception as e:
+            print(f"❌ Buffer error: {e}")
 
-threading.Thread(target=process_buffer, daemon=True).start()
+buffer_thread = threading.Thread(target=process_buffer, daemon=True)
+buffer_thread.start()
+print("✅ Buffer thread started")
 
 @app.route('/')
 def home():
