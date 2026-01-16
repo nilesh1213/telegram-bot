@@ -179,11 +179,11 @@
             loadGroups();
             loadAllMessages();
             
-            // Auto-refresh every 5 seconds
+            // Auto-refresh buffer and stats every 10 seconds (not 5)
             setInterval(() => {
                 loadStats();
                 loadBuffer();
-            }, 5000);
+            }, 10000);
             
             // Refresh messages every 30 seconds
             setInterval(() => {
@@ -254,26 +254,28 @@
             fetch(`${API_BASE}/api/messages?limit=50`)
                 .then(r => r.json())
                 .then(data => {
+                    console.log('📬 Sent messages received:', data);
                     const table = document.getElementById('allMessagesTable');
                     
                     if (!data.messages || data.messages.length === 0) {
-                        table.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No sent messages yet (database not initialized)</td></tr>';
+                        table.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No sent messages yet - send some alerts to see them here!</td></tr>';
                         return;
                     }
                     
+                    console.log(`✅ Displaying ${data.messages.length} sent messages`);
                     table.innerHTML = data.messages.map(m => `
                         <tr>
                             <td>${m.timestamp}</td>
-                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${m.message}</td>
+                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: pre-wrap;">${m.message}</td>
                             <td>${m.group_name}</td>
                             <td><code>${m.keywords}</code></td>
-                            <td><span class="status-sent">✅ ${m.status.toUpperCase()}</span></td>
+                            <td><span class="status-sent">✅ SENT</span></td>
                         </tr>
                     `).join('');
                 })
                 .catch(err => {
-                    console.error('Messages load error:', err);
-                    document.getElementById('allMessagesTable').innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No sent messages yet</td></tr>';
+                    console.error('❌ Messages load error:', err);
+                    document.getElementById('allMessagesTable').innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">Error loading messages</td></tr>';
                 });
         }
         
