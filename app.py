@@ -540,40 +540,64 @@ def home():
 def webhook_router():
     """Main webhook - receives TradingView alerts and adds to buffer"""
     try:
-        raw_data = request.data.decode('utf-8')
+        # Get raw data
+        content_type = request.headers.get('Content-Type', '')
+        
+        # Handle JSON format (TradingView default)
+        if 'application/json' in content_type:
+            data = request.get_json()
+            if data and isinstance(data, dict):
+                # Try different possible keys TradingView might use
+                raw_data = data.get('message') or data.get('text') or data.get('alert') or data.get('data') or str(data)
+            else:
+                raw_data = request.data.decode('utf-8')
+        else:
+            # Handle plain text format (manual tests)
+            raw_data = request.data.decode('utf-8')
         
         if not raw_data:
+            print("❌ ERROR: No data received!", flush=True)
             return jsonify({'error': 'No data received'}), 400
         
-        print("\n" + "═" * 70)
-        print("🔔 ALERT RECEIVED - ADDING TO BUFFER")
-        print("═" * 70)
-        print(f"Message: {raw_data}")
-        print("─" * 70)
+        print("\n" + "═" * 70, flush=True)
+        print("🔔 ALERT RECEIVED - ADDING TO BUFFER", flush=True)
+        print("═" * 70, flush=True)
+        print(f"Content-Type: {content_type}", flush=True)
+        print(f"Raw Request Data: {request.data[:200]}", flush=True)
+        print(f"Processed Message: {raw_data}", flush=True)
+        print("─" * 70, flush=True)
         
         # Route to appropriate groups based on keywords
-        message_upper = raw_data.upper()
+        message_upper = str(raw_data).upper()
         routed_to = []
+        
+        print(f"🔍 Searching for keywords in: {message_upper[:100]}", flush=True)
         
         for group_key, group_config in GROUPS.items():
             if not group_config['enabled']:
+                print(f"⏸️  Skipping disabled group: {group_config['name']}", flush=True)
                 continue
             
             for keyword in group_config['keywords']:
+                print(f"   Checking keyword '{keyword}' in message...", flush=True)
                 if keyword.upper() in message_upper:
                     group_id = group_config['group_id']
                     group_name = group_config['name']
                     
+                    print(f"   ✅ MATCH! Keyword '{keyword}' found!", flush=True)
+                    
                     # Add to buffer instead of sending immediately
-                    add_to_buffer(group_id, group_name, raw_data, keyword)
+                    add_to_buffer(group_id, group_name, str(raw_data), keyword)
                     routed_to.append({'group_name': group_name})
                     break
+                else:
+                    print(f"   ❌ No match for '{keyword}'", flush=True)
         
         if routed_to:
-            print(f"✅ Added to {len(routed_to)} buffer(s)")
+            print(f"✅ Added to {len(routed_to)} buffer(s)", flush=True)
             for item in routed_to:
-                print(f"   → {item['group_name']}")
-            print("═" * 70 + "\n")
+                print(f"   → {item['group_name']}", flush=True)
+            print("═" * 70 + "\n", flush=True)
             
             return jsonify({
                 'success': True,
@@ -581,16 +605,21 @@ def webhook_router():
                 'groups': [item['group_name'] for item in routed_to]
             }), 200
         else:
-            print("⚠️ No groups matched")
-            print("═" * 70 + "\n")
+            print("⚠️  NO GROUPS MATCHED!", flush=True)
+            print(f"   Message received: {raw_data[:200]}", flush=True)
+            print(f"   Available keywords: {[kw for g in GROUPS.values() for kw in g['keywords']]}", flush=True)
+            print("═" * 70 + "\n", flush=True)
             
             return jsonify({
                 'success': False,
-                'error': 'No matching groups'
+                'error': 'No matching groups',
+                'message_received': str(raw_data)[:200]
             }), 200
         
     except Exception as e:
-        print(f"\n❌ ERROR: {e}\n")
+        print(f"\n❌ WEBHOOK ERROR: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/buffer', methods=['GET'])
