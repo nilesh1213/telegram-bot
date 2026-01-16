@@ -85,7 +85,40 @@ last_batch_time = datetime.now()
 # 💾 DATABASE INITIALIZATION
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _init_db_on_startup():
+def _init_db_on_startup()
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔧 AUTO-FIX DATABASE SCHEMA
+# ═══════════════════════════════════════════════════════════════════════════
+
+def auto_fix_schema():
+    """Auto-fix missing columns in database on startup"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        if DATABASE_TYPE == 'postgresql':
+            # Add status column if missing
+            cursor.execute('''
+                ALTER TABLE messages 
+                ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'sent'
+            ''')
+            print("✅ Database schema auto-fixed: status column added/verified")
+        elif DATABASE_TYPE == 'sqlite':
+            # SQLite doesn't have IF NOT EXISTS for ALTER
+            cursor.execute("PRAGMA table_info(messages)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if 'status' not in columns:
+                cursor.execute('ALTER TABLE messages ADD COLUMN status TEXT DEFAULT "sent"')
+                print("✅ Database schema auto-fixed: status column added")
+        
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️  Schema auto-fix skipped: {e}")
+
+# Run auto-fix on startup
+auto_fix_schema():
     """Initialize database tables when app starts"""
     try:
         from contextlib import contextmanager
