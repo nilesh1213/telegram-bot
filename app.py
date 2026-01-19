@@ -510,8 +510,11 @@ def update_user_expiry(group_id, user_id, additional_days):
                 # If it's some other type, convert to datetime
                 current_expiry = datetime.fromisoformat(str(result[0]))
         
+        print(f"📅 Current expiry: {current_expiry}")
+        
         # Calculate new expiry
         new_expiry = current_expiry + timedelta(days=additional_days)
+        print(f"📅 New expiry: {new_expiry} (added {additional_days} days)")
         
         # Format for database
         if DATABASE_TYPE == 'sqlite':
@@ -521,6 +524,7 @@ def update_user_expiry(group_id, user_id, additional_days):
         
         # FIXED: Calculate days_left from TODAY to new expiry
         days_left_from_today = (new_expiry - datetime.now()).days
+        print(f"📊 Days left from today: {days_left_from_today}")
         
         cursor.execute(f'''
             UPDATE users
@@ -529,6 +533,9 @@ def update_user_expiry(group_id, user_id, additional_days):
         ''', (new_expiry_str, days_left_from_today, group_id, user_id))
         
         conn.commit()
+        print(f"✅ Updated user {user_id} in database")
+    else:
+        print(f"❌ User {user_id} not found in group {group_id}")
     
     conn.close()
 
@@ -802,10 +809,18 @@ def api_group_users(group_id):
     for user_id, name, invited, expiry, days, status in users:
         joined = check_user_in_group(group_id, user_id)
         
-        # Format dates for display
+        # Format dates for display - REMOVE MICROSECONDS
         if DATABASE_TYPE == 'postgresql':
-            invited_str = invited.strftime('%Y-%m-%d %H:%M:%S') if isinstance(invited, datetime) else str(invited)
-            expiry_str = expiry.strftime('%Y-%m-%d %H:%M:%S') if isinstance(expiry, datetime) else str(expiry)
+            # Handle datetime objects from PostgreSQL
+            if isinstance(invited, datetime):
+                invited_str = invited.strftime('%Y-%m-%d %H:%M')  # No seconds or microseconds
+            else:
+                invited_str = str(invited).split('.')[0]  # Remove microseconds if string
+            
+            if isinstance(expiry, datetime):
+                expiry_str = expiry.strftime('%Y-%m-%d %H:%M')  # No seconds or microseconds
+            else:
+                expiry_str = str(expiry).split('.')[0]  # Remove microseconds if string
         else:
             invited_str = invited
             expiry_str = expiry
@@ -877,18 +892,30 @@ def api_add_user():
 @app.route('/api/user/extend', methods=['POST'])
 def api_extend_user():
     """Extend user expiry"""
-    data = request.json
+    try:
+        data = request.json
+        
+        if data.get('admin_id') != ADMIN_USER_ID:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        group_id = data.get('group_id')
+        user_id = data.get('user_id')
+        days = int(data.get('days', 30))
+        
+        if not group_id or not user_id:
+            return jsonify({'error': 'Missing group_id or user_id'}), 400
+        
+        update_user_expiry(group_id, user_id, days)
+        
+        print(f"✅ Extended user {user_id} in group {group_id} by {days} days")
+        
+        return jsonify({'success': True, 'message': f'Extended by {days} days'}), 200
     
-    if data.get('admin_id') != ADMIN_USER_ID:
-        return jsonify({'error': 'Unauthorized'}), 403
-    
-    group_id = data.get('group_id')
-    user_id = data.get('user_id')
-    days = int(data.get('days', 30))
-    
-    update_user_expiry(group_id, user_id, days)
-    
-    return jsonify({'success': True}), 200
+    except Exception as e:
+        print(f"❌ Extend error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/user/remove', methods=['POST'])
 def api_remove_user():
