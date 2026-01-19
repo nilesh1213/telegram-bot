@@ -188,12 +188,17 @@
         loadAllMessages();
         loadGroups();
         
-        // Auto-refresh every 5 seconds
+        // Auto-refresh stats, buffer, messages every 5 seconds
         setInterval(() => {
             loadStats();
             loadBuffer();
             loadAllMessages();
         }, 5000);
+        
+        // Auto-refresh groups/users every 30 seconds (to show updated days_left)
+        setInterval(() => {
+            loadGroups();
+        }, 30000);
         
         // ⏱️ LIVE COUNTDOWN - Updates every second!
         setInterval(() => {
