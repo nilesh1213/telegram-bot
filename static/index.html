@@ -54,6 +54,7 @@
         .group-header h2 { margin-bottom: 10px; }
         .keywords { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
         .keyword-tag { background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 15px; font-size: 12px; }
+        .group-content { padding: 20px; overflow-x: auto; }
         
         .group-content { padding: 20px; }
         .tab-buttons { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; }
@@ -67,11 +68,17 @@
         .btn-success { background: #28a745; color: white; }
         .btn-danger { background: #dc3545; color: white; }
         .btn-warning { background: #ffc107; color: white; }
-        .btn-sm { padding: 5px 10px; font-size: 12px; }
+        .btn-sm { padding: 4px 8px; font-size: 14px; margin: 0 2px; }
         
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background: #f8f9fa; font-weight: 600; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 10px 8px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; font-weight: 600; font-size: 12px; }
+        td code { font-size: 11px; background: #f0f0f0; padding: 2px 6px; border-radius: 3px; }
+        td:nth-child(1) { max-width: 100px; overflow: hidden; text-overflow: ellipsis; } /* User ID */
+        td:nth-child(2) { max-width: 120px; overflow: hidden; text-overflow: ellipsis; } /* Name */
+        td:nth-child(3), td:nth-child(4) { font-size: 11px; white-space: nowrap; } /* Dates */
+        td:nth-child(5) { font-weight: bold; white-space: nowrap; } /* Days Left */
+        td:last-child { white-space: nowrap; } /* Actions */
         
         .status-sent { color: #28a745; font-weight: bold; }
         .status-buffered { color: #ffc107; font-weight: bold; }
@@ -382,24 +389,31 @@
                         table.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No users yet</td></tr>';
                         return;
                     }
-                    table.innerHTML = data.users.map(u => `
+                    table.innerHTML = data.users.map(u => {
+                        // Format dates to be shorter (just date, no time)
+                        const invitedDate = u.invited_date.split(' ')[0];
+                        const expiryDate = u.expiry_date.split(' ')[0];
+                        
+                        return `
                         <tr>
                             <td><code>${u.user_id}</code></td>
-                            <td>${u.name}</td>
-                            <td>${u.invited_date}</td>
-                            <td>${u.expiry_date}</td>
-                            <td>${u.days_left} days</td>
+                            <td title="${u.name}">${u.name}</td>
+                            <td>${invitedDate}</td>
+                            <td>${expiryDate}</td>
+                            <td style="color: ${u.days_left < 0 ? '#dc3545' : u.days_left < 7 ? '#ffc107' : '#28a745'}">
+                                ${u.days_left} days
+                            </td>
                             <td><span class="${u.joined ? 'status-joined' : 'status-pending'}">${u.joined ? '✅ Joined' : '⏳ Pending'}</span></td>
                             <td>
                                 ${u.joined ? `
-                                    <button class="btn btn-warning btn-sm" onclick="extendUser('${groupId}', '${u.user_id}')">Extend</button>
-                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')">Remove</button>
+                                    <button class="btn btn-warning btn-sm" onclick="extendUser('${groupId}', '${u.user_id}')" title="Extend subscription">➕</button>
+                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')" title="Remove user">❌</button>
                                 ` : `
-                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')">Cancel</button>
+                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')" title="Cancel invitation">❌</button>
                                 `}
                             </td>
                         </tr>
-                    `).join('');
+                    `}).join('');
                 });
         }
         

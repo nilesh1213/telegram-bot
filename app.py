@@ -494,13 +494,29 @@ def update_user_expiry(group_id, user_id, additional_days):
     
     result = cursor.fetchone()
     if result:
+        # Parse current expiry date properly for both databases
         if DATABASE_TYPE == 'sqlite':
             current_expiry = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
-            new_expiry = current_expiry + timedelta(days=additional_days)
+        else:  # postgresql
+            # Handle both datetime objects and strings from PostgreSQL
+            if isinstance(result[0], datetime):
+                current_expiry = result[0]
+            elif isinstance(result[0], str):
+                try:
+                    current_expiry = datetime.fromisoformat(result[0])
+                except:
+                    current_expiry = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
+            else:
+                # If it's some other type, convert to datetime
+                current_expiry = datetime.fromisoformat(str(result[0]))
+        
+        # Calculate new expiry
+        new_expiry = current_expiry + timedelta(days=additional_days)
+        
+        # Format for database
+        if DATABASE_TYPE == 'sqlite':
             new_expiry_str = new_expiry.strftime('%Y-%m-%d %H:%M:%S')
         else:  # postgresql
-            current_expiry = result[0]
-            new_expiry = current_expiry + timedelta(days=additional_days)
             new_expiry_str = new_expiry
         
         # FIXED: Calculate days_left from TODAY to new expiry
