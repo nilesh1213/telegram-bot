@@ -52,10 +52,8 @@
         .group-section { background: white; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden; }
         .group-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; }
         .group-header h2 { margin-bottom: 10px; }
-        .keywords { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-        .keyword-tag { background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 15px; font-size: 12px; }
-        .group-content { padding: 15px; overflow-x: auto; }
-        .group-content table { min-width: 700px; } /* Ensure minimum width so columns don't get too squished */
+        .keywords { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 5px; }
+        .keyword-tag { background: rgba(255,255,255,0.3); padding: 6px 16px; border-radius: 20px; font-size: 14px; font-weight: bold; letter-spacing: 0.5px; }
         
         .group-content { padding: 20px; }
         .tab-buttons { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; }
@@ -69,23 +67,11 @@
         .btn-success { background: #28a745; color: white; }
         .btn-danger { background: #dc3545; color: white; }
         .btn-warning { background: #ffc107; color: white; }
-        .btn-sm { padding: 3px 6px; font-size: 13px; margin: 0 1px; border-radius: 4px; }
+        .btn-sm { padding: 5px 10px; font-size: 12px; }
         
-        table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
-        th, td { padding: 8px 6px; text-align: left; border-bottom: 1px solid #ddd; overflow: hidden; }
-        th { background: #f8f9fa; font-weight: 600; font-size: 11px; white-space: nowrap; }
-        
-        /* Column widths for user table */
-        table th:nth-child(1), table td:nth-child(1) { width: 90px; } /* User ID */
-        table th:nth-child(2), table td:nth-child(2) { width: 120px; } /* Name */
-        table th:nth-child(3), table td:nth-child(3) { width: 100px; } /* Invited */
-        table th:nth-child(4), table td:nth-child(4) { width: 100px; } /* Expires */
-        table th:nth-child(5), table td:nth-child(5) { width: 70px; } /* Days Left */
-        table th:nth-child(6), table td:nth-child(6) { width: 80px; } /* Status */
-        table th:nth-child(7), table td:nth-child(7) { width: 80px; min-width: 80px; } /* Actions */
-        
-        td code { font-size: 10px; background: #f0f0f0; padding: 2px 4px; border-radius: 3px; display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-        td { font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; font-weight: 600; }
         
         .status-sent { color: #28a745; font-weight: bold; }
         .status-buffered { color: #ffc107; font-weight: bold; }
@@ -202,17 +188,12 @@
         loadAllMessages();
         loadGroups();
         
-        // Auto-refresh stats, buffer, messages every 5 seconds
+        // Auto-refresh every 5 seconds
         setInterval(() => {
             loadStats();
             loadBuffer();
             loadAllMessages();
         }, 5000);
-        
-        // Auto-refresh groups/users every 30 seconds (to show updated days_left)
-        setInterval(() => {
-            loadGroups();
-        }, 30000);
         
         // ⏱️ LIVE COUNTDOWN - Updates every second!
         setInterval(() => {
@@ -305,6 +286,7 @@
                             <div class="group-header">
                                 <h2>${g.name}</h2>
                                 <p>Group ID: <code>${g.group_id}</code></p>
+                                <p style="margin-top: 8px;"><strong>📌 Keyword:</strong></p>
                                 <div class="keywords">
                                     ${g.keywords.map(k => `<span class="keyword-tag">${k}</span>`).join('')}
                                 </div>
@@ -396,27 +378,24 @@
                         table.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No users yet</td></tr>';
                         return;
                     }
-                    table.innerHTML = data.users.map(u => {
-                        return `
+                    table.innerHTML = data.users.map(u => `
                         <tr>
-                            <td><code title="${u.user_id}">${u.user_id.substring(0, 8)}...</code></td>
-                            <td title="${u.name}">${u.name.length > 15 ? u.name.substring(0, 15) + '...' : u.name}</td>
-                            <td style="font-size: 10px;">${u.invited_date}</td>
-                            <td style="font-size: 10px;">${u.expiry_date}</td>
-                            <td style="color: ${u.days_left < 0 ? '#dc3545' : u.days_left < 7 ? '#ffc107' : '#28a745'}; font-weight: bold;">
-                                ${u.days_left}d
-                            </td>
-                            <td><span class="${u.joined ? 'status-joined' : 'status-pending'}" style="font-size: 10px;">${u.joined ? '✅' : '⏳'}</span></td>
-                            <td style="white-space: nowrap;">
+                            <td><code>${u.user_id}</code></td>
+                            <td>${u.name}</td>
+                            <td>${u.invited_date}</td>
+                            <td>${u.expiry_date}</td>
+                            <td>${u.days_left} days</td>
+                            <td><span class="${u.joined ? 'status-joined' : 'status-pending'}">${u.joined ? '✅ Joined' : '⏳ Pending'}</span></td>
+                            <td>
                                 ${u.joined ? `
-                                    <button class="btn btn-warning btn-sm" onclick="extendUser('${groupId}', '${u.user_id}')" title="Extend">➕</button>
-                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')" title="Remove">❌</button>
+                                    <button class="btn btn-warning btn-sm" onclick="extendUser('${groupId}', '${u.user_id}')">Extend</button>
+                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')">Remove</button>
                                 ` : `
-                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')" title="Cancel">❌</button>
+                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')">Cancel</button>
                                 `}
                             </td>
                         </tr>
-                    `}).join('');
+                    `).join('');
                 });
         }
         
@@ -508,35 +487,18 @@
         
         function extendUser(groupId, userId) {
             const days = prompt('Extend by how many days?', '30');
-            if (!days || days <= 0) return;
-            
-            console.log(`Extending user ${userId} in group ${groupId} by ${days} days`);
-            
+            if (!days) return;
             fetch(`${API_BASE}/api/user/extend`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ admin_id: ADMIN_ID, group_id: groupId, user_id: userId, days: parseInt(days) })
             })
-            .then(r => {
-                console.log('Extend response status:', r.status);
-                if (!r.ok) {
-                    throw new Error(`HTTP error! status: ${r.status}`);
-                }
-                return r.json();
-            })
+            .then(r => r.json())
             .then(data => {
-                console.log('Extend response:', data);
                 if (data.success) {
-                    alert(`✅ Extended by ${days} days! The table will refresh automatically.`);
-                    // Force immediate reload of groups
+                    alert(`✅ Extended by ${days} days!`);
                     loadGroups();
-                } else {
-                    alert('❌ Error: ' + (data.error || 'Unknown error'));
                 }
-            })
-            .catch(error => {
-                console.error('Extend error:', error);
-                alert('❌ Failed to extend user: ' + error.message + '\n\nCheck browser console (F12) for details.');
             });
         }
         

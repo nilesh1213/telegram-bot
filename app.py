@@ -1,11 +1,6 @@
 """
 ═══════════════════════════════════════════════════════════════════════════
-    TELEGRAM UNIFIED SYSTEM - COMPLETE VERSION (FIXED)
-    
-    FIXES:
-    ✅ Days left calculated DYNAMICALLY (not static from DB)
-    ✅ Extend function RECALCULATES days correctly
-    ✅ Auto-expiry checker removes users when expired
+    TELEGRAM UNIFIED SYSTEM - COMPLETE VERSION
     
     Features:
     ✅ 60-second MESSAGE BUFFER system
@@ -35,7 +30,7 @@ CORS(app)
 # 🔧 CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════
 
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', "8435296160:AAGERJ9ZGwlgR578OUcil84wrGLVrb8Ej7A")
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', "8114249780:AAHxXXmK68vnI7-QpO1HEsTQv4w2cKPqQ-A")
 ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID', "8363089809")
 
 # Database Configuration - Check environment variable first
@@ -84,6 +79,53 @@ GROUPS = {
         'name': 'Commodity',
         'group_id': os.environ.get('COMMODITY_GROUP_ID', '-5052531894'),
         'keywords': ['COMMODITY'],
+        'enabled': True
+    },
+    'CRUDE': {
+        'name': 'Crude 👉',
+        'group_id': os.environ.get('CRUDE_GROUP_ID', '-1003827512738'),  # CORRECTED
+        'keywords': ['CRUDE'],
+        'enabled': True,
+        'also_send_to_commodity': True  # Also send to COMMODITY group
+    },
+    'NATURALGAS': {
+        'name': 'Natural Gas 👉',
+        'group_id': os.environ.get('NATURALGAS_GROUP_ID', '-1003495490379'),  # CORRECTED
+        'keywords': ['NATURALGAS'],
+        'enabled': True,
+        'also_send_to_commodity': True  # Also send to COMMODITY group
+    },
+    'SILVER': {
+        'name': 'Silver 👉',
+        'group_id': os.environ.get('SILVER_GROUP_ID', '-1003479189825'),  # CORRECTED
+        'keywords': ['SILVER'],
+        'enabled': True,
+        'also_send_to_commodity': True  # Also send to COMMODITY group
+    },
+    'GOLD': {
+        'name': 'Gold 👉',
+        'group_id': os.environ.get('GOLD_GROUP_ID', '-1003668837632'),  # CORRECTED
+        'keywords': ['GOLD'],
+        'enabled': True,
+        'also_send_to_commodity': True  # Also send to COMMODITY group
+    },
+    'COPPER': {
+        'name': 'Copper 👉',
+        'group_id': os.environ.get('COPPER_GROUP_ID', '-1003832712767'),  # CORRECTED
+        'keywords': ['COPPER'],
+        'enabled': True,
+        'also_send_to_commodity': True  # Also send to COMMODITY group
+    },
+    'CASH': {
+        'name': 'Cash Intraday 👉',
+        'group_id': os.environ.get('CASH_GROUP_ID', '-1003603299587'),  # CORRECTED
+        'keywords': ['CASH'],
+        'enabled': True
+    },
+    'SWING': {
+        'name': 'Swing and Investment Cash 👉',
+        'group_id': os.environ.get('SWING_GROUP_ID', '-1003563158525'),  # CORRECTED
+        'keywords': ['SWING'],
         'enabled': True
     }
 }
@@ -155,63 +197,6 @@ def process_buffer():
 buffer_thread = threading.Thread(target=process_buffer, daemon=True)
 buffer_thread.start()
 print("✅ Buffer thread started")
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 🕐 AUTO-EXPIRY CHECKER (NEW FUNCTION)
-# ═══════════════════════════════════════════════════════════════════════════
-
-def check_expired_users():
-    """Background thread - checks for expired users every hour and removes them"""
-    print("🔄 Expiry checker thread starting...")
-    
-    while True:
-        try:
-            time.sleep(3600)  # Check every hour
-            print("⏰ Checking for expired users...")
-            
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            # Get all users
-            cursor.execute('SELECT user_id, group_id, expiry_date FROM users')
-            users = cursor.fetchall()
-            conn.close()
-            
-            now = datetime.now()
-            removed_count = 0
-            
-            for user in users:
-                user_id, group_id, expiry_date = user
-                
-                # Parse expiry date
-                if DATABASE_TYPE == 'sqlite':
-                    expiry_dt = datetime.strptime(expiry_date, '%Y-%m-%d %H:%M:%S')
-                else:  # postgresql
-                    expiry_dt = expiry_date if isinstance(expiry_date, datetime) else datetime.fromisoformat(str(expiry_date))
-                
-                # Check if expired
-                if now > expiry_dt:
-                    print(f"🗑️ Removing expired user: {user_id} from group {group_id}")
-                    
-                    # Remove from Telegram group
-                    ban_user_from_group(group_id, user_id)
-                    
-                    # Remove from database
-                    remove_user(group_id, user_id)
-                    removed_count += 1
-            
-            if removed_count > 0:
-                print(f"✅ Removed {removed_count} expired user(s)")
-            else:
-                print("📭 No expired users found")
-                
-        except Exception as e:
-            print(f"❌ Expiry checker error: {e}")
-
-# Start expiry checker thread
-expiry_thread = threading.Thread(target=check_expired_users, daemon=True)
-expiry_thread.start()
-print("✅ Expiry checker thread started")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 💾 DATABASE CONNECTION
@@ -310,6 +295,12 @@ def send_to_telegram(group_id, text):
         return True
     except Exception as e:
         print(f"❌ Failed to send to {group_id}: {e}")
+        # Show detailed error response from Telegram
+        try:
+            error_details = response.json()
+            print(f"   Telegram API Response: {error_details}")
+        except:
+            pass
         return False
 
 def create_invite_link(group_id, expire_days=30):
@@ -412,7 +403,7 @@ def get_group_admins(group_id):
         return []
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 🗃️ DATABASE FUNCTIONS (FIXED)
+# 🗃️ DATABASE FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
 
 def add_user(group_id, user_id, days):
@@ -448,13 +439,13 @@ def add_user(group_id, user_id, days):
     conn.close()
 
 def get_users_by_group(group_id):
-    """Get all users for a specific group - CALCULATES days_left dynamically"""
+    """Get all users for a specific group"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
     placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
     cursor.execute(f'''
-        SELECT user_id, name, invited_date, expiry_date, status
+        SELECT user_id, name, invited_date, expiry_date, days_left, status
         FROM users
         WHERE group_id = {placeholder}
         ORDER BY invited_date DESC
@@ -462,27 +453,10 @@ def get_users_by_group(group_id):
     
     users = cursor.fetchall()
     conn.close()
-    
-    # Calculate days_left dynamically for each user
-    result = []
-    for user in users:
-        user_id, name, invited_date, expiry_date, status = user
-        
-        # Parse expiry_date and calculate days left
-        if DATABASE_TYPE == 'sqlite':
-            expiry_dt = datetime.strptime(expiry_date, '%Y-%m-%d %H:%M:%S')
-        else:  # postgresql
-            expiry_dt = expiry_date if isinstance(expiry_date, datetime) else datetime.fromisoformat(str(expiry_date))
-        
-        # Calculate days left from TODAY to expiry (can be negative if expired)
-        days_left = (expiry_dt - datetime.now()).days
-        
-        result.append((user_id, name, invited_date, expiry_date, days_left, status))
-    
-    return result
+    return users
 
 def update_user_expiry(group_id, user_id, additional_days):
-    """Extend user expiry - FIXED to recalculate days correctly"""
+    """Extend user expiry"""
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -494,48 +468,22 @@ def update_user_expiry(group_id, user_id, additional_days):
     
     result = cursor.fetchone()
     if result:
-        # Parse current expiry date properly for both databases
         if DATABASE_TYPE == 'sqlite':
             current_expiry = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
-        else:  # postgresql
-            # Handle both datetime objects and strings from PostgreSQL
-            if isinstance(result[0], datetime):
-                current_expiry = result[0]
-            elif isinstance(result[0], str):
-                try:
-                    current_expiry = datetime.fromisoformat(result[0])
-                except:
-                    current_expiry = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
-            else:
-                # If it's some other type, convert to datetime
-                current_expiry = datetime.fromisoformat(str(result[0]))
-        
-        print(f"📅 Current expiry: {current_expiry}")
-        
-        # Calculate new expiry
-        new_expiry = current_expiry + timedelta(days=additional_days)
-        print(f"📅 New expiry: {new_expiry} (added {additional_days} days)")
-        
-        # Format for database
-        if DATABASE_TYPE == 'sqlite':
+            new_expiry = current_expiry + timedelta(days=additional_days)
             new_expiry_str = new_expiry.strftime('%Y-%m-%d %H:%M:%S')
         else:  # postgresql
+            current_expiry = result[0]
+            new_expiry = current_expiry + timedelta(days=additional_days)
             new_expiry_str = new_expiry
-        
-        # FIXED: Calculate days_left from TODAY to new expiry
-        days_left_from_today = (new_expiry - datetime.now()).days
-        print(f"📊 Days left from today: {days_left_from_today}")
         
         cursor.execute(f'''
             UPDATE users
-            SET expiry_date = {placeholder}, days_left = {placeholder}
+            SET expiry_date = {placeholder}, days_left = days_left + {placeholder}
             WHERE group_id = {placeholder} AND user_id = {placeholder}
-        ''', (new_expiry_str, days_left_from_today, group_id, user_id))
+        ''', (new_expiry_str, additional_days, group_id, user_id))
         
         conn.commit()
-        print(f"✅ Updated user {user_id} in database")
-    else:
-        print(f"❌ User {user_id} not found in group {group_id}")
     
     conn.close()
 
@@ -694,6 +642,19 @@ def webhook_router():
                     # Add to buffer instead of sending immediately
                     add_to_buffer(group_id, group_name, str(raw_data), keyword)
                     routed_to.append({'group_name': group_name})
+                    
+                    # If this is a commodity-specific group, also send to COMMODITY group
+                    if group_config.get('also_send_to_commodity', False):
+                        commodity_group = GROUPS.get('COMMODITY')
+                        if commodity_group and commodity_group['enabled']:
+                            commodity_id = commodity_group['group_id']
+                            commodity_name = commodity_group['name']
+                            print(f"   📌 Also adding to {commodity_name} group!", flush=True)
+                            add_to_buffer(commodity_id, commodity_name, str(raw_data), keyword)
+                            # Only add to routed_to if not already added
+                            if {'group_name': commodity_name} not in routed_to:
+                                routed_to.append({'group_name': commodity_name})
+                    
                     break
                 else:
                     print(f"   ❌ No match for '{keyword}'", flush=True)
@@ -809,18 +770,10 @@ def api_group_users(group_id):
     for user_id, name, invited, expiry, days, status in users:
         joined = check_user_in_group(group_id, user_id)
         
-        # Format dates for display - REMOVE MICROSECONDS
+        # Format dates for display
         if DATABASE_TYPE == 'postgresql':
-            # Handle datetime objects from PostgreSQL
-            if isinstance(invited, datetime):
-                invited_str = invited.strftime('%Y-%m-%d %H:%M')  # No seconds or microseconds
-            else:
-                invited_str = str(invited).split('.')[0]  # Remove microseconds if string
-            
-            if isinstance(expiry, datetime):
-                expiry_str = expiry.strftime('%Y-%m-%d %H:%M')  # No seconds or microseconds
-            else:
-                expiry_str = str(expiry).split('.')[0]  # Remove microseconds if string
+            invited_str = invited.strftime('%Y-%m-%d %H:%M:%S') if isinstance(invited, datetime) else str(invited)
+            expiry_str = expiry.strftime('%Y-%m-%d %H:%M:%S') if isinstance(expiry, datetime) else str(expiry)
         else:
             invited_str = invited
             expiry_str = expiry
@@ -892,30 +845,18 @@ def api_add_user():
 @app.route('/api/user/extend', methods=['POST'])
 def api_extend_user():
     """Extend user expiry"""
-    try:
-        data = request.json
-        
-        if data.get('admin_id') != ADMIN_USER_ID:
-            return jsonify({'error': 'Unauthorized'}), 403
-        
-        group_id = data.get('group_id')
-        user_id = data.get('user_id')
-        days = int(data.get('days', 30))
-        
-        if not group_id or not user_id:
-            return jsonify({'error': 'Missing group_id or user_id'}), 400
-        
-        update_user_expiry(group_id, user_id, days)
-        
-        print(f"✅ Extended user {user_id} in group {group_id} by {days} days")
-        
-        return jsonify({'success': True, 'message': f'Extended by {days} days'}), 200
+    data = request.json
     
-    except Exception as e:
-        print(f"❌ Extend error: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+    if data.get('admin_id') != ADMIN_USER_ID:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    group_id = data.get('group_id')
+    user_id = data.get('user_id')
+    days = int(data.get('days', 30))
+    
+    update_user_expiry(group_id, user_id, days)
+    
+    return jsonify({'success': True}), 200
 
 @app.route('/api/user/remove', methods=['POST'])
 def api_remove_user():
@@ -952,7 +893,7 @@ def health():
 
 if __name__ == '__main__':
     print("\n" + "═" * 70)
-    print("║" + " " * 15 + "TELEGRAM UNIFIED SYSTEM - FIXED VERSION" + " " * 15 + "║")
+    print("║" + " " * 15 + "TELEGRAM UNIFIED SYSTEM - COMPLETE" + " " * 20 + "║")
     print("═" * 70)
     
     init_database()
@@ -961,7 +902,6 @@ if __name__ == '__main__':
     print(f"✅ Admin ID: {ADMIN_USER_ID}")
     print(f"✅ Database: {DATABASE_TYPE}")
     print(f"✅ Buffer System: ACTIVE (60-second batching)")
-    print(f"✅ Expiry Checker: ACTIVE (checks every hour)")
     
     print("\n📋 CONFIGURED GROUPS:")
     for key, config in GROUPS.items():
@@ -974,7 +914,6 @@ if __name__ == '__main__':
     print("📡 Webhook: /webhook/router")
     print("🏠 Dashboard: http://localhost:5000")
     print("⏳ Messages buffered for 60 seconds before sending")
-    print("🕐 Expired users removed automatically every hour")
     print("═" * 70)
     print()
     
