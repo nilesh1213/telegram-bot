@@ -468,10 +468,20 @@ def update_user_expiry(group_id, user_id, additional_days):
             new_expiry = current_expiry + timedelta(days=additional_days)
             new_expiry_str = new_expiry.strftime('%Y-%m-%d %H:%M:%S')
         else:  # postgresql
-            current_expiry = result[0]
-            # Remove timezone for comparison if present
-            if hasattr(current_expiry, 'tzinfo') and current_expiry.tzinfo is not None:
-                current_expiry = current_expiry.replace(tzinfo=None)
+            # Parse the result - it might be datetime or string
+            if isinstance(result[0], str):
+                # It's a string, parse it
+                try:
+                    current_expiry = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    # Try with microseconds
+                    current_expiry = datetime.strptime(result[0].split('.')[0], '%Y-%m-%d %H:%M:%S')
+            else:
+                # It's already a datetime object
+                current_expiry = result[0]
+                # Remove timezone for comparison if present
+                if hasattr(current_expiry, 'tzinfo') and current_expiry.tzinfo is not None:
+                    current_expiry = current_expiry.replace(tzinfo=None)
             new_expiry = current_expiry + timedelta(days=additional_days)
             new_expiry_str = new_expiry
         
@@ -501,10 +511,20 @@ def reduce_user_expiry(group_id, user_id, reduce_days):
         if DATABASE_TYPE == 'sqlite':
             current_expiry = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
         else:  # postgresql
-            current_expiry = result[0]
-            # Remove timezone for comparison if present
-            if hasattr(current_expiry, 'tzinfo') and current_expiry.tzinfo is not None:
-                current_expiry = current_expiry.replace(tzinfo=None)
+            # Parse the result - it might be datetime or string
+            if isinstance(result[0], str):
+                # It's a string, parse it
+                try:
+                    current_expiry = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    # Try with microseconds
+                    current_expiry = datetime.strptime(result[0].split('.')[0], '%Y-%m-%d %H:%M:%S')
+            else:
+                # It's already a datetime object
+                current_expiry = result[0]
+                # Remove timezone for comparison if present
+                if hasattr(current_expiry, 'tzinfo') and current_expiry.tzinfo is not None:
+                    current_expiry = current_expiry.replace(tzinfo=None)
         
         # Calculate what the new expiry would be
         new_expiry = current_expiry - timedelta(days=reduce_days)
