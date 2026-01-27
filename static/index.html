@@ -386,14 +386,10 @@
                             <td>${u.expiry_date}</td>
                             <td>${u.days_left} days</td>
                             <td><span class="${u.joined ? 'status-joined' : 'status-pending'}">${u.joined ? '✅ Joined' : '⏳ Pending'}</span></td>
-                            <td style="min-width: 180px;">
-                                ${u.joined ? `
-                                    <button class="btn btn-warning btn-sm" onclick="extendUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Extend</button>
-                                    <button class="btn btn-primary btn-sm" onclick="reduceUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Reduce</button>
-                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Remove</button>
-                                ` : `
-                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')">Cancel</button>
-                                `}
+                            <td style="min-width: 280px;">
+                                <button class="btn btn-warning btn-sm" onclick="extendUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Extend</button>
+                                <button class="btn btn-primary btn-sm" onclick="reduceUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Reduce</button>
+                                <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Remove</button>
                             </td>
                         </tr>
                     `).join('');
