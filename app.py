@@ -798,49 +798,67 @@ def api_groups():
 @app.route('/api/group/<group_id>/users', methods=['GET'])
 def api_group_users(group_id):
     """Get users for specific group"""
-    users = get_users_by_group(group_id)
+    try:
+        users = get_users_by_group(group_id)
+        
+        result = []
+        current_time = datetime.now()
+        
+        for user_id, name, invited, expiry, days, status in users:
+            try:
+                joined = check_user_in_group(group_id, user_id)
+                
+                # Format dates for display
+                if DATABASE_TYPE == 'postgresql':
+                    invited_str = invited.strftime('%Y-%m-%d %H:%M:%S') if isinstance(invited, datetime) else str(invited)
+                    expiry_str = expiry.strftime('%Y-%m-%d %H:%M:%S') if isinstance(expiry, datetime) else str(expiry)
+                    
+                    # Parse expiry date
+                    if isinstance(expiry, datetime):
+                        expiry_date = expiry
+                    else:
+                        try:
+                            expiry_date = datetime.strptime(expiry, '%Y-%m-%d %H:%M:%S')
+                        except:
+                            expiry_date = datetime.strptime(str(expiry), '%Y-%m-%d %H:%M:%S.%f')
+                    
+                    # Remove timezone info for comparison
+                    if hasattr(expiry_date, 'tzinfo') and expiry_date.tzinfo is not None:
+                        expiry_date = expiry_date.replace(tzinfo=None)
+                else:
+                    invited_str = invited
+                    expiry_str = expiry
+                    expiry_date = datetime.strptime(expiry, '%Y-%m-%d %H:%M:%S')
+                
+                # Calculate days_left dynamically
+                time_diff = expiry_date - current_time
+                days_left_calculated = max(0, time_diff.days)
+                
+                # Skip expired users from display
+                if days_left_calculated <= 0:
+                    continue  # Don't show expired users
+                
+                result.append({
+                    'user_id': user_id,
+                    'name': name,
+                    'invited_date': invited_str,
+                    'expiry_date': expiry_str,
+                    'days_left': days_left_calculated,
+                    'status': status,
+                    'joined': joined
+                })
+            except Exception as e:
+                print(f"❌ Error processing user {user_id} in group {group_id}: {e}")
+                # Continue with next user instead of failing entire request
+                continue
+        
+        return jsonify({'users': result}), 200
     
-    result = []
-    current_time = datetime.now()
-    
-    for user_id, name, invited, expiry, days, status in users:
-        joined = check_user_in_group(group_id, user_id)
-        
-        # Format dates for display
-        if DATABASE_TYPE == 'postgresql':
-            invited_str = invited.strftime('%Y-%m-%d %H:%M:%S') if isinstance(invited, datetime) else str(invited)
-            expiry_str = expiry.strftime('%Y-%m-%d %H:%M:%S') if isinstance(expiry, datetime) else str(expiry)
-            expiry_date = expiry if isinstance(expiry, datetime) else datetime.strptime(expiry, '%Y-%m-%d %H:%M:%S')
-            
-            # CRITICAL FIX: Remove timezone info for comparison
-            if expiry_date.tzinfo is not None:
-                expiry_date = expiry_date.replace(tzinfo=None)
-        else:
-            invited_str = invited
-            expiry_str = expiry
-            expiry_date = datetime.strptime(expiry, '%Y-%m-%d %H:%M:%S')
-        
-        # Calculate days_left dynamically
-        time_diff = expiry_date - current_time
-        days_left_calculated = max(0, time_diff.days)
-        
-        # Auto-remove expired users
-        if days_left_calculated <= 0 and joined:
-            ban_user_from_group(group_id, user_id)
-            remove_user(group_id, user_id)
-            continue  # Skip adding to result
-        
-        result.append({
-            'user_id': user_id,
-            'name': name,
-            'invited_date': invited_str,
-            'expiry_date': expiry_str,
-            'days_left': days_left_calculated,
-            'status': status,
-            'joined': joined
-        })
-    
-    return jsonify({'users': result}), 200
+    except Exception as e:
+        print(f"❌ Fatal error in api_group_users for {group_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'users': []}), 200  # Return 200 with empty array instead of 500
 
 @app.route('/api/group/<group_id>/admins', methods=['GET'])
 def api_group_admins(group_id):
