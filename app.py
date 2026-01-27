@@ -609,12 +609,23 @@ def get_all_messages(limit=100):
     cursor = conn.cursor()
     
     placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
-    cursor.execute(f'''
-        SELECT timestamp, message, group_name, matched_keywords, message_id, group_id
-        FROM messages
-        ORDER BY id DESC
-        LIMIT {placeholder}
-    ''', (limit,))
+    
+    # Try to get message_id and group_id if columns exist, fallback to basic query
+    try:
+        cursor.execute(f'''
+            SELECT timestamp, message, group_name, matched_keywords, message_id, group_id
+            FROM messages
+            ORDER BY id DESC
+            LIMIT {placeholder}
+        ''', (limit,))
+    except:
+        # Columns don't exist yet, use old query
+        cursor.execute(f'''
+            SELECT timestamp, message, group_name, matched_keywords
+            FROM messages
+            ORDER BY id DESC
+            LIMIT {placeholder}
+        ''', (limit,))
     
     messages = cursor.fetchall()
     conn.close()
@@ -781,7 +792,14 @@ def api_all_messages():
     messages = get_all_messages(limit)
     
     result = []
-    for timestamp, message, group_name, keywords in messages:
+    for row in messages:
+        # Handle both old (4 columns) and new (6 columns) format
+        if len(row) == 6:
+            timestamp, message, group_name, keywords, message_id, group_id = row
+        else:
+            timestamp, message, group_name, keywords = row
+            message_id, group_id = None, None
+        
         # Format timestamp for display
         if DATABASE_TYPE == 'postgresql':
             timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if isinstance(timestamp, datetime) else str(timestamp)
@@ -793,6 +811,8 @@ def api_all_messages():
             'message': message,
             'group_name': group_name,
             'keywords': keywords,
+            'message_id': message_id,
+            'group_id': group_id,
             'status': 'sent'
         })
     
