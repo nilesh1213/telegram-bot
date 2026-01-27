@@ -83,38 +83,33 @@ GROUPS = {
     },
     'CRUDE': {
         'name': 'Crude 👉',
-        'group_id': os.environ.get('CRUDE_GROUP_ID', '-1003827512738'),  # CORRECTED
+        'group_id': os.environ.get('CRUDE_GROUP_ID', '-1003827512738'),
         'keywords': ['CRUDE'],
-        'enabled': True,
-        'also_send_to_commodity': True  # Also send to COMMODITY group
+        'enabled': True
     },
     'NATURALGAS': {
         'name': 'Natural Gas 👉',
-        'group_id': os.environ.get('NATURALGAS_GROUP_ID', '-1003495490379'),  # CORRECTED
+        'group_id': os.environ.get('NATURALGAS_GROUP_ID', '-1003495490379'),
         'keywords': ['NATURALGAS'],
-        'enabled': True,
-        'also_send_to_commodity': True  # Also send to COMMODITY group
+        'enabled': True
     },
     'SILVER': {
         'name': 'Silver 👉',
-        'group_id': os.environ.get('SILVER_GROUP_ID', '-1003479189825'),  # CORRECTED
+        'group_id': os.environ.get('SILVER_GROUP_ID', '-1003479189825'),
         'keywords': ['SILVER'],
-        'enabled': True,
-        'also_send_to_commodity': True  # Also send to COMMODITY group
+        'enabled': True
     },
     'GOLD': {
         'name': 'Gold 👉',
-        'group_id': os.environ.get('GOLD_GROUP_ID', '-1003668837632'),  # CORRECTED
+        'group_id': os.environ.get('GOLD_GROUP_ID', '-1003668837632'),
         'keywords': ['GOLD'],
-        'enabled': True,
-        'also_send_to_commodity': True  # Also send to COMMODITY group
+        'enabled': True
     },
     'COPPER': {
         'name': 'Copper 👉',
-        'group_id': os.environ.get('COPPER_GROUP_ID', '-1003832712767'),  # CORRECTED
+        'group_id': os.environ.get('COPPER_GROUP_ID', '-1003832712767'),
         'keywords': ['COPPER'],
-        'enabled': True,
-        'also_send_to_commodity': True  # Also send to COMMODITY group
+        'enabled': True
     },
     'CASH': {
         'name': 'Cash Intraday 👉',
@@ -176,15 +171,16 @@ def process_buffer():
                     # Combine all messages for this group
                     combined = "\n\n\n".join([m['message'] for m in msgs])
                     
-                    if send_to_telegram(gid, combined):
-                        # Log the combined message
+                    message_id = send_to_telegram(gid, combined)
+                    if message_id:
+                        # Log the combined message with message_id
                         log_message(combined, gid, msgs[0]['group_name'], 
-                                  ", ".join(set([m['keyword'] for m in msgs])))
+                                  ", ".join(set([m['keyword'] for m in msgs])), message_id)
                         print(f"✅ Sent to {msgs[0]['group_name']} ({len(msgs)} messages)")
                     
                     # Delay between groups to avoid rate limits
                     if idx < len(buffer_snapshot) - 1:
-                        time.sleep(10)
+                        time.sleep(5)  # 5 seconds between groups
                 
                 last_batch_time = datetime.now()
             else:
@@ -245,7 +241,8 @@ def init_database():
                 message TEXT,
                 group_id TEXT,
                 group_name TEXT,
-                matched_keywords TEXT
+                matched_keywords TEXT,
+                message_id INTEGER
             )
         ''')
     
@@ -272,7 +269,8 @@ def init_database():
                 message TEXT,
                 group_id VARCHAR(100),
                 group_name VARCHAR(200),
-                matched_keywords VARCHAR(200)
+                matched_keywords VARCHAR(200),
+                message_id BIGINT
             )
         ''')
     
@@ -285,14 +283,17 @@ def init_database():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def send_to_telegram(group_id, text):
-    """Send message to Telegram group"""
+    """Send message to Telegram group and return message_id"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': group_id, 'text': text}
     
     try:
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
-        return True
+        data = response.json()
+        # Return message_id for deletion capability
+        message_id = data.get('result', {}).get('message_id')
+        return message_id
     except Exception as e:
         print(f"❌ Failed to send to {group_id}: {e}")
         # Show detailed error response from Telegram
@@ -301,6 +302,19 @@ def send_to_telegram(group_id, text):
             print(f"   Telegram API Response: {error_details}")
         except:
             pass
+        return None
+
+def delete_message_from_telegram(group_id, message_id):
+    """Delete message from Telegram group"""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteMessage"
+    payload = {'chat_id': group_id, 'message_id': message_id}
+    
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"❌ Failed to delete message {message_id} from {group_id}: {e}")
         return False
 
 def create_invite_link(group_id, expire_days=30):
@@ -487,6 +501,57 @@ def update_user_expiry(group_id, user_id, additional_days):
     
     conn.close()
 
+def reduce_user_expiry(group_id, user_id, reduce_days):
+    """Reduce user expiry (but not below current date) - Returns error if would go negative"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
+    cursor.execute(f'''
+        SELECT expiry_date FROM users
+        WHERE group_id = {placeholder} AND user_id = {placeholder}
+    ''', (group_id, user_id))
+    
+    result = cursor.fetchone()
+    if result:
+        if DATABASE_TYPE == 'sqlite':
+            current_expiry = datetime.strptime(result[0], '%Y-%m-%d %H:%M:%S')
+        else:  # postgresql
+            current_expiry = result[0]
+            # Remove timezone for comparison if present
+            if current_expiry.tzinfo is not None:
+                current_expiry = current_expiry.replace(tzinfo=None)
+        
+        # Calculate what the new expiry would be
+        new_expiry = current_expiry - timedelta(days=reduce_days)
+        current_time = datetime.now()
+        
+        # Check if reduction would result in negative days
+        if new_expiry < current_time:
+            # Calculate how many days they currently have left
+            days_left = max(0, (current_expiry - current_time).days)
+            conn.close()
+            return {'error': f'Cannot reduce by {reduce_days} days. User only has {days_left} days left. Maximum you can reduce is {days_left} days.'}
+        
+        # Safe to reduce
+        if DATABASE_TYPE == 'sqlite':
+            new_expiry_str = new_expiry.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            new_expiry_str = new_expiry
+        
+        cursor.execute(f'''
+            UPDATE users
+            SET expiry_date = {placeholder}
+            WHERE group_id = {placeholder} AND user_id = {placeholder}
+        ''', (new_expiry_str, group_id, user_id))
+        
+        conn.commit()
+        conn.close()
+        return {'success': True}
+    
+    conn.close()
+    return {'error': 'User not found'}
+
 def remove_user(group_id, user_id):
     """Remove user from database"""
     conn = get_db_connection()
@@ -498,7 +563,7 @@ def remove_user(group_id, user_id):
     conn.commit()
     conn.close()
 
-def log_message(message, group_id, group_name, matched_keywords):
+def log_message(message, group_id, group_name, matched_keywords, message_id=None):
     """Log message sent to group"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -508,14 +573,14 @@ def log_message(message, group_id, group_name, matched_keywords):
     if DATABASE_TYPE == 'sqlite':
         timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
         cursor.execute('''
-            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (timestamp_str, message, group_id, group_name, matched_keywords))
+            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords, message_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (timestamp_str, message, group_id, group_name, matched_keywords, message_id))
     elif DATABASE_TYPE == 'postgresql':
         cursor.execute('''
-            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords)
-            VALUES (%s, %s, %s, %s, %s)
-        ''', (timestamp, message, group_id, group_name, matched_keywords))
+            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords, message_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (timestamp, message, group_id, group_name, matched_keywords, message_id))
     
     conn.commit()
     conn.close()
@@ -545,7 +610,7 @@ def get_all_messages(limit=100):
     
     placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
     cursor.execute(f'''
-        SELECT timestamp, message, group_name, matched_keywords
+        SELECT timestamp, message, group_name, matched_keywords, message_id, group_id
         FROM messages
         ORDER BY id DESC
         LIMIT {placeholder}
@@ -642,18 +707,6 @@ def webhook_router():
                     # Add to buffer instead of sending immediately
                     add_to_buffer(group_id, group_name, str(raw_data), keyword)
                     routed_to.append({'group_name': group_name})
-                    
-                    # If this is a commodity-specific group, also send to COMMODITY group
-                    if group_config.get('also_send_to_commodity', False):
-                        commodity_group = GROUPS.get('COMMODITY')
-                        if commodity_group and commodity_group['enabled']:
-                            commodity_id = commodity_group['group_id']
-                            commodity_name = commodity_group['name']
-                            print(f"   📌 Also adding to {commodity_name} group!", flush=True)
-                            add_to_buffer(commodity_id, commodity_name, str(raw_data), keyword)
-                            # Only add to routed_to if not already added
-                            if {'group_name': commodity_name} not in routed_to:
-                                routed_to.append({'group_name': commodity_name})
                     
                     break
                 else:
@@ -767,6 +820,8 @@ def api_group_users(group_id):
     users = get_users_by_group(group_id)
     
     result = []
+    current_time = datetime.now()
+    
     for user_id, name, invited, expiry, days, status in users:
         joined = check_user_in_group(group_id, user_id)
         
@@ -774,16 +829,32 @@ def api_group_users(group_id):
         if DATABASE_TYPE == 'postgresql':
             invited_str = invited.strftime('%Y-%m-%d %H:%M:%S') if isinstance(invited, datetime) else str(invited)
             expiry_str = expiry.strftime('%Y-%m-%d %H:%M:%S') if isinstance(expiry, datetime) else str(expiry)
+            expiry_date = expiry if isinstance(expiry, datetime) else datetime.strptime(expiry, '%Y-%m-%d %H:%M:%S')
+            
+            # CRITICAL FIX: Remove timezone info for comparison
+            if expiry_date.tzinfo is not None:
+                expiry_date = expiry_date.replace(tzinfo=None)
         else:
             invited_str = invited
             expiry_str = expiry
+            expiry_date = datetime.strptime(expiry, '%Y-%m-%d %H:%M:%S')
+        
+        # Calculate days_left dynamically
+        time_diff = expiry_date - current_time
+        days_left_calculated = max(0, time_diff.days)
+        
+        # Auto-remove expired users
+        if days_left_calculated <= 0 and joined:
+            ban_user_from_group(group_id, user_id)
+            remove_user(group_id, user_id)
+            continue  # Skip adding to result
         
         result.append({
             'user_id': user_id,
             'name': name,
             'invited_date': invited_str,
             'expiry_date': expiry_str,
-            'days_left': days,
+            'days_left': days_left_calculated,
             'status': status,
             'joined': joined
         })
@@ -855,6 +926,25 @@ def api_extend_user():
     days = int(data.get('days', 30))
     
     update_user_expiry(group_id, user_id, days)
+    
+    return jsonify({'success': True}), 200
+
+@app.route('/api/user/reduce', methods=['POST'])
+def api_reduce_user():
+    """Reduce user expiry"""
+    data = request.json
+    
+    if data.get('admin_id') != ADMIN_USER_ID:
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    group_id = data.get('group_id')
+    user_id = data.get('user_id')
+    days = int(data.get('days', 1))
+    
+    result = reduce_user_expiry(group_id, user_id, days)
+    
+    if result.get('error'):
+        return jsonify({'error': result['error']}), 400
     
     return jsonify({'success': True}), 200
 
