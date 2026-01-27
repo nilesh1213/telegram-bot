@@ -386,10 +386,11 @@
                             <td>${u.expiry_date}</td>
                             <td>${u.days_left} days</td>
                             <td><span class="${u.joined ? 'status-joined' : 'status-pending'}">${u.joined ? '✅ Joined' : '⏳ Pending'}</span></td>
-                            <td>
+                            <td style="min-width: 180px;">
                                 ${u.joined ? `
-                                    <button class="btn btn-warning btn-sm" onclick="extendUser('${groupId}', '${u.user_id}')">Extend</button>
-                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')">Remove</button>
+                                    <button class="btn btn-warning btn-sm" onclick="extendUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Extend</button>
+                                    <button class="btn btn-primary btn-sm" onclick="reduceUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Reduce</button>
+                                    <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Remove</button>
                                 ` : `
                                     <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')">Cancel</button>
                                 `}
@@ -498,6 +499,25 @@
                 if (data.success) {
                     alert(`✅ Extended by ${days} days!`);
                     loadGroups();
+                }
+            });
+        }
+        
+        function reduceUser(groupId, userId) {
+            const days = prompt('Reduce by how many days?', '1');
+            if (!days) return;
+            fetch(`${API_BASE}/api/user/reduce`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ admin_id: ADMIN_ID, group_id: groupId, user_id: userId, days: parseInt(days) })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`✅ Reduced by ${days} days!`);
+                    loadGroups();
+                } else if (data.error) {
+                    alert(`❌ ${data.error}`);
                 }
             });
         }

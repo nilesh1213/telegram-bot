@@ -171,11 +171,10 @@ def process_buffer():
                     # Combine all messages for this group
                     combined = "\n\n\n".join([m['message'] for m in msgs])
                     
-                    message_id = send_to_telegram(gid, combined)
-                    if message_id:
-                        # Log the combined message with message_id
+                    if send_to_telegram(gid, combined):
+                        # Log the combined message
                         log_message(combined, gid, msgs[0]['group_name'], 
-                                  ", ".join(set([m['keyword'] for m in msgs])), message_id)
+                                  ", ".join(set([m['keyword'] for m in msgs])))
                         print(f"✅ Sent to {msgs[0]['group_name']} ({len(msgs)} messages)")
                     
                     # Delay between groups to avoid rate limits
@@ -241,8 +240,7 @@ def init_database():
                 message TEXT,
                 group_id TEXT,
                 group_name TEXT,
-                matched_keywords TEXT,
-                message_id INTEGER
+                matched_keywords TEXT
             )
         ''')
     
@@ -269,8 +267,7 @@ def init_database():
                 message TEXT,
                 group_id VARCHAR(100),
                 group_name VARCHAR(200),
-                matched_keywords VARCHAR(200),
-                message_id BIGINT
+                matched_keywords VARCHAR(200)
             )
         ''')
     
@@ -283,17 +280,14 @@ def init_database():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def send_to_telegram(group_id, text):
-    """Send message to Telegram group and return message_id"""
+    """Send message to Telegram group"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': group_id, 'text': text}
     
     try:
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
-        data = response.json()
-        # Return message_id for deletion capability
-        message_id = data.get('result', {}).get('message_id')
-        return message_id
+        return True
     except Exception as e:
         print(f"❌ Failed to send to {group_id}: {e}")
         # Show detailed error response from Telegram
@@ -302,19 +296,6 @@ def send_to_telegram(group_id, text):
             print(f"   Telegram API Response: {error_details}")
         except:
             pass
-        return None
-
-def delete_message_from_telegram(group_id, message_id):
-    """Delete message from Telegram group"""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteMessage"
-    payload = {'chat_id': group_id, 'message_id': message_id}
-    
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        response.raise_for_status()
-        return True
-    except Exception as e:
-        print(f"❌ Failed to delete message {message_id} from {group_id}: {e}")
         return False
 
 def create_invite_link(group_id, expire_days=30):
@@ -563,7 +544,7 @@ def remove_user(group_id, user_id):
     conn.commit()
     conn.close()
 
-def log_message(message, group_id, group_name, matched_keywords, message_id=None):
+def log_message(message, group_id, group_name, matched_keywords):
     """Log message sent to group"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -573,14 +554,14 @@ def log_message(message, group_id, group_name, matched_keywords, message_id=None
     if DATABASE_TYPE == 'sqlite':
         timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
         cursor.execute('''
-            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords, message_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (timestamp_str, message, group_id, group_name, matched_keywords, message_id))
+            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (timestamp_str, message, group_id, group_name, matched_keywords))
     elif DATABASE_TYPE == 'postgresql':
         cursor.execute('''
-            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords, message_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        ''', (timestamp, message, group_id, group_name, matched_keywords, message_id))
+            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (timestamp, message, group_id, group_name, matched_keywords))
     
     conn.commit()
     conn.close()
@@ -609,23 +590,12 @@ def get_all_messages(limit=100):
     cursor = conn.cursor()
     
     placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
-    
-    # Try to get message_id and group_id if columns exist, fallback to basic query
-    try:
-        cursor.execute(f'''
-            SELECT timestamp, message, group_name, matched_keywords, message_id, group_id
-            FROM messages
-            ORDER BY id DESC
-            LIMIT {placeholder}
-        ''', (limit,))
-    except:
-        # Columns don't exist yet, use old query
-        cursor.execute(f'''
-            SELECT timestamp, message, group_name, matched_keywords
-            FROM messages
-            ORDER BY id DESC
-            LIMIT {placeholder}
-        ''', (limit,))
+    cursor.execute(f'''
+        SELECT timestamp, message, group_name, matched_keywords
+        FROM messages
+        ORDER BY id DESC
+        LIMIT {placeholder}
+    ''', (limit,))
     
     messages = cursor.fetchall()
     conn.close()
@@ -792,14 +762,7 @@ def api_all_messages():
     messages = get_all_messages(limit)
     
     result = []
-    for row in messages:
-        # Handle both old (4 columns) and new (6 columns) format
-        if len(row) == 6:
-            timestamp, message, group_name, keywords, message_id, group_id = row
-        else:
-            timestamp, message, group_name, keywords = row
-            message_id, group_id = None, None
-        
+    for timestamp, message, group_name, keywords in messages:
         # Format timestamp for display
         if DATABASE_TYPE == 'postgresql':
             timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if isinstance(timestamp, datetime) else str(timestamp)
@@ -811,8 +774,6 @@ def api_all_messages():
             'message': message,
             'group_name': group_name,
             'keywords': keywords,
-            'message_id': message_id,
-            'group_id': group_id,
             'status': 'sent'
         })
     
