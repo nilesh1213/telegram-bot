@@ -503,7 +503,7 @@ def reduce_user_expiry(group_id, user_id, reduce_days):
         else:  # postgresql
             current_expiry = result[0]
             # Remove timezone for comparison if present
-            if current_expiry.tzinfo is not None:
+            if hasattr(current_expiry, 'tzinfo') and current_expiry.tzinfo is not None:
                 current_expiry = current_expiry.replace(tzinfo=None)
         
         # Calculate what the new expiry would be
@@ -940,37 +940,49 @@ def api_extend_user():
 @app.route('/api/user/reduce', methods=['POST'])
 def api_reduce_user():
     """Reduce user expiry"""
-    data = request.json
-    
-    if data.get('admin_id') != ADMIN_USER_ID:
-        return jsonify({'error': 'Unauthorized'}), 403
-    
-    group_id = data.get('group_id')
-    user_id = data.get('user_id')
-    days = int(data.get('days', 1))
-    
-    result = reduce_user_expiry(group_id, user_id, days)
-    
-    if result.get('error'):
-        return jsonify({'error': result['error']}), 400
-    
-    return jsonify({'success': True}), 200
+    try:
+        data = request.json
+        
+        if data.get('admin_id') != ADMIN_USER_ID:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        group_id = data.get('group_id')
+        user_id = data.get('user_id')
+        days = int(data.get('days', 1))
+        
+        result = reduce_user_expiry(group_id, user_id, days)
+        
+        if result.get('error'):
+            return jsonify({'error': result['error']}), 400
+        
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        print(f"❌ Error in api_reduce_user: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/user/remove', methods=['POST'])
 def api_remove_user():
     """Remove user from group"""
-    data = request.json
-    
-    if data.get('admin_id') != ADMIN_USER_ID:
-        return jsonify({'error': 'Unauthorized'}), 403
-    
-    group_id = data.get('group_id')
-    user_id = data.get('user_id')
-    
-    ban_user_from_group(group_id, user_id)
-    remove_user(group_id, user_id)
-    
-    return jsonify({'success': True}), 200
+    try:
+        data = request.json
+        
+        if data.get('admin_id') != ADMIN_USER_ID:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        group_id = data.get('group_id')
+        user_id = data.get('user_id')
+        
+        ban_user_from_group(group_id, user_id)
+        remove_user(group_id, user_id)
+        
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        print(f"❌ Error in api_remove_user: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/config', methods=['GET'])
 def api_config():
