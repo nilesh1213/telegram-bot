@@ -469,14 +469,17 @@ def update_user_expiry(group_id, user_id, additional_days):
             new_expiry_str = new_expiry.strftime('%Y-%m-%d %H:%M:%S')
         else:  # postgresql
             current_expiry = result[0]
+            # Remove timezone for comparison if present
+            if hasattr(current_expiry, 'tzinfo') and current_expiry.tzinfo is not None:
+                current_expiry = current_expiry.replace(tzinfo=None)
             new_expiry = current_expiry + timedelta(days=additional_days)
             new_expiry_str = new_expiry
         
         cursor.execute(f'''
             UPDATE users
-            SET expiry_date = {placeholder}, days_left = days_left + {placeholder}
+            SET expiry_date = {placeholder}
             WHERE group_id = {placeholder} AND user_id = {placeholder}
-        ''', (new_expiry_str, additional_days, group_id, user_id))
+        ''', (new_expiry_str, group_id, user_id))
         
         conn.commit()
     
@@ -915,18 +918,24 @@ def api_add_user():
 @app.route('/api/user/extend', methods=['POST'])
 def api_extend_user():
     """Extend user expiry"""
-    data = request.json
-    
-    if data.get('admin_id') != ADMIN_USER_ID:
-        return jsonify({'error': 'Unauthorized'}), 403
-    
-    group_id = data.get('group_id')
-    user_id = data.get('user_id')
-    days = int(data.get('days', 30))
-    
-    update_user_expiry(group_id, user_id, days)
-    
-    return jsonify({'success': True}), 200
+    try:
+        data = request.json
+        
+        if data.get('admin_id') != ADMIN_USER_ID:
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        group_id = data.get('group_id')
+        user_id = data.get('user_id')
+        days = int(data.get('days', 30))
+        
+        update_user_expiry(group_id, user_id, days)
+        
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        print(f"❌ Error in api_extend_user: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/user/reduce', methods=['POST'])
 def api_reduce_user():
