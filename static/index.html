@@ -370,7 +370,8 @@
         }
         
         function loadGroupUsers(groupId, groupKey) {
-            fetch(`${API_BASE}/api/group/${groupId}/users`)
+            const timestamp = new Date().getTime(); // Cache buster
+            fetch(`${API_BASE}/api/group/${groupId}/users?t=${timestamp}`)
                 .then(r => r.json())
                 .then(data => {
                     const table = document.getElementById(`${groupKey}-users-table`);
@@ -484,7 +485,11 @@
         
         function extendUser(groupId, userId) {
             const days = prompt('Extend by how many days?', '30');
-            if (!days) return;
+            if (!days || days <= 0) return;
+            
+            const confirmed = confirm(`Extend user subscription by ${days} days?`);
+            if (!confirmed) return;
+            
             fetch(`${API_BASE}/api/user/extend`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -493,28 +498,49 @@
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
-                    alert(`✅ Extended by ${days} days!`);
-                    loadGroups();
+                    alert(`✅ Extended by ${days} days! Page will refresh.`);
+                    location.reload();  // Force page reload to show changes
+                } else if (data.error) {
+                    alert(`❌ ${data.error}`);
                 }
+            })
+            .catch(err => {
+                alert(`❌ Network error: ${err.message}`);
             });
         }
         
         function reduceUser(groupId, userId) {
             const days = prompt('Reduce by how many days?', '1');
-            if (!days) return;
+            if (!days || days <= 0) return;
+            
+            console.log('Reducing user:', userId, 'by', days, 'days');
+            
+            // Show loading feedback
+            const confirmed = confirm(`Reduce user subscription by ${days} days?`);
+            if (!confirmed) return;
+            
             fetch(`${API_BASE}/api/user/reduce`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ admin_id: ADMIN_ID, group_id: groupId, user_id: userId, days: parseInt(days) })
             })
-            .then(r => r.json())
+            .then(r => {
+                console.log('Response status:', r.status);
+                return r.json();
+            })
             .then(data => {
+                console.log('Response data:', data);
                 if (data.success) {
-                    alert(`✅ Reduced by ${days} days!`);
-                    loadGroups();
+                    alert(`✅ Reduced by ${days} days! Page will refresh.`);
+                    // Force page reload to show updated data
+                    location.reload();
                 } else if (data.error) {
                     alert(`❌ ${data.error}`);
                 }
+            })
+            .catch(err => {
+                console.error('Reduce error:', err);
+                alert(`❌ Network error: ${err.message}`);
             });
         }
         
@@ -528,11 +554,14 @@
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
-                    alert('✅ User removed!');
-                    loadGroups();
+                    alert('✅ User removed! Page will refresh.');
+                    location.reload();  // Force page reload
                 } else {
                     alert('❌ Error: ' + data.error);
                 }
+            })
+            .catch(err => {
+                alert(`❌ Network error: ${err.message}`);
             });
         }
     </script>
