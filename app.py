@@ -63,12 +63,48 @@ else:
 # ═══════════════════════════════════════════════════════════════════════════
 
 GROUPS = {
+    # ═══════════════════════════════════════════════════════════════════
+    # SPECIFIC GROUPS FIRST (checked before parent groups)
+    # ═══════════════════════════════════════════════════════════════════
+    'ZONE_REVERSAL_LONG': {
+        'name': 'Zone Reversal Long 📈',
+        'group_id': os.environ.get('ZONE_REVERSAL_LONG_GROUP_ID', '-1003763196446'),
+        'keywords': ['ZONE REVERSAL LONG'],
+        'enabled': True,
+        'parent_group': 'ZONE'  # Also send to Zone Signals
+    },
+    'ZONE_REVERSAL_SHORT': {
+        'name': 'Zone Reversal Short 📉',
+        'group_id': os.environ.get('ZONE_REVERSAL_SHORT_GROUP_ID', '-1003887891053'),
+        'keywords': ['ZONE REVERSAL SHORT'],
+        'enabled': True,
+        'parent_group': 'ZONE'  # Also send to Zone Signals
+    },
+    'CASH_REVERSAL_LONG': {
+        'name': 'Cash Reversal Long 📈',
+        'group_id': os.environ.get('CASH_REVERSAL_LONG_GROUP_ID', '-1003557486410'),
+        'keywords': ['CASH REVERSAL LONG'],
+        'enabled': True,
+        'parent_group': 'CASH'  # Also send to Cash Intraday
+    },
+    # ═══════════════════════════════════════════════════════════════════
+    # PARENT/GENERAL GROUPS (checked after specific groups)
+    # ═══════════════════════════════════════════════════════════════════
     'ZONE': {
         'name': 'Zone Signals',
         'group_id': os.environ.get('ZONE_GROUP_ID', '-1003668316027'),
         'keywords': ['ZONE'],
         'enabled': True
     },
+    'CASH': {
+        'name': 'Cash Intraday 👉',
+        'group_id': os.environ.get('CASH_GROUP_ID', '-1003603299587'),
+        'keywords': ['CASH'],
+        'enabled': True
+    },
+    # ═══════════════════════════════════════════════════════════════════
+    # OTHER GROUPS
+    # ═══════════════════════════════════════════════════════════════════
     'INDEX': {
         'name': 'Index Option Buying',
         'group_id': os.environ.get('INDEX_GROUP_ID', '-5286555501'),
@@ -111,15 +147,9 @@ GROUPS = {
         'keywords': ['COPPER'],
         'enabled': True
     },
-    'CASH': {
-        'name': 'Cash Intraday 👉',
-        'group_id': os.environ.get('CASH_GROUP_ID', '-1003603299587'),  # CORRECTED
-        'keywords': ['CASH'],
-        'enabled': True
-    },
     'SWING': {
         'name': 'Swing and Investment Cash 👉',
-        'group_id': os.environ.get('SWING_GROUP_ID', '-1003563158525'),  # CORRECTED
+        'group_id': os.environ.get('SWING_GROUP_ID', '-1003563158525'),
         'keywords': ['SWING'],
         'enabled': True
     }
@@ -702,15 +732,32 @@ def webhook_router():
             
             for keyword in group_config['keywords']:
                 print(f"   Checking keyword '{keyword}' in message...", flush=True)
-                if keyword.upper() in message_upper:
+                
+                # Check if ALL words in keyword are present in message (not exact phrase)
+                keyword_words = keyword.upper().split()
+                all_words_present = all(word in message_upper for word in keyword_words)
+                
+                if all_words_present:
                     group_id = group_config['group_id']
                     group_name = group_config['name']
                     
-                    print(f"   ✅ MATCH! Keyword '{keyword}' found!", flush=True)
+                    print(f"   ✅ MATCH! All words from '{keyword}' found in message!", flush=True)
                     
-                    # Add to buffer instead of sending immediately
+                    # Add to buffer
                     add_to_buffer(group_id, group_name, str(raw_data), keyword)
                     routed_to.append({'group_name': group_name})
+                    
+                    # If this group has a parent_group, also send to parent
+                    if 'parent_group' in group_config:
+                        parent_key = group_config['parent_group']
+                        if parent_key in GROUPS and GROUPS[parent_key]['enabled']:
+                            parent_config = GROUPS[parent_key]
+                            parent_id = parent_config['group_id']
+                            parent_name = parent_config['name']
+                            
+                            print(f"   📤 Also sending to PARENT group: {parent_name}", flush=True)
+                            add_to_buffer(parent_id, parent_name, str(raw_data), keyword)
+                            routed_to.append({'group_name': parent_name + ' (parent)'})
                     
                     break
                 else:
