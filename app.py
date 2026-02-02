@@ -123,6 +123,12 @@ GROUPS = {
         'keywords': ['SWING'],
         'enabled': True
     },
+    'CRYPTO': {
+        'name': 'Crypto',
+        'group_id': os.environ.get('CRYPTO_GROUP_ID', '-1003641717967'),
+        'keywords': ['CRYPTO'],
+        'enabled': True
+    },
     'INSTITUTION': {
         'name': 'Institution Buying Shares',
         'group_id': os.environ.get('INSTITUTION_GROUP_ID', '-1003517861259'),
