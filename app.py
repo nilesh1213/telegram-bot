@@ -63,48 +63,12 @@ else:
 # ═══════════════════════════════════════════════════════════════════════════
 
 GROUPS = {
-    # ═══════════════════════════════════════════════════════════════════
-    # SPECIFIC GROUPS FIRST (checked before parent groups)
-    # ═══════════════════════════════════════════════════════════════════
-    'ZONE_REVERSAL_LONG': {
-        'name': 'Zone Reversal Long 📈',
-        'group_id': os.environ.get('ZONE_REVERSAL_LONG_GROUP_ID', '-1003763196446'),
-        'keywords': ['ZONE REVERSAL LONG'],
-        'enabled': True,
-        'parent_group': 'ZONE'  # Also send to Zone Signals
-    },
-    'ZONE_REVERSAL_SHORT': {
-        'name': 'Zone Reversal Short 📉',
-        'group_id': os.environ.get('ZONE_REVERSAL_SHORT_GROUP_ID', '-1003887891053'),
-        'keywords': ['ZONE REVERSAL SHORT'],
-        'enabled': True,
-        'parent_group': 'ZONE'  # Also send to Zone Signals
-    },
-    'CASH_REVERSAL_LONG': {
-        'name': 'Cash Reversal Long 📈',
-        'group_id': os.environ.get('CASH_REVERSAL_LONG_GROUP_ID', '-1003557486410'),
-        'keywords': ['CASH REVERSAL LONG'],
-        'enabled': True,
-        'parent_group': 'CASH'  # Also send to Cash Intraday
-    },
-    # ═══════════════════════════════════════════════════════════════════
-    # PARENT/GENERAL GROUPS (checked after specific groups)
-    # ═══════════════════════════════════════════════════════════════════
     'ZONE': {
         'name': 'Zone Signals',
         'group_id': os.environ.get('ZONE_GROUP_ID', '-1003668316027'),
         'keywords': ['ZONE'],
         'enabled': True
     },
-    'CASH': {
-        'name': 'Cash Intraday 👉',
-        'group_id': os.environ.get('CASH_GROUP_ID', '-1003603299587'),
-        'keywords': ['CASH'],
-        'enabled': True
-    },
-    # ═══════════════════════════════════════════════════════════════════
-    # OTHER GROUPS
-    # ═══════════════════════════════════════════════════════════════════
     'INDEX': {
         'name': 'Index Option Buying',
         'group_id': os.environ.get('INDEX_GROUP_ID', '-5286555501'),
@@ -147,11 +111,60 @@ GROUPS = {
         'keywords': ['COPPER'],
         'enabled': True
     },
+    'CASH': {
+        'name': 'Cash Intraday 👉',
+        'group_id': os.environ.get('CASH_GROUP_ID', '-1003603299587'),  # CORRECTED
+        'keywords': ['CASH'],
+        'enabled': True
+    },
     'SWING': {
         'name': 'Swing and Investment Cash 👉',
-        'group_id': os.environ.get('SWING_GROUP_ID', '-1003563158525'),
+        'group_id': os.environ.get('SWING_GROUP_ID', '-1003563158525'),  # CORRECTED
         'keywords': ['SWING'],
         'enabled': True
+    },
+    'INSTITUTION': {
+        'name': 'Institution Buying Shares',
+        'group_id': os.environ.get('INSTITUTION_GROUP_ID', '-1003517861259'),
+        'keywords': [
+            'VIJAYPD', 'WALCHANNAG', 'APEX', 'KRISHNADEF', 'OLIL', 'RATNAVEER', 
+            'HINDCOPPER', 'ANGELONE', 'ANANTRAJ', 'BSE', 'MCX', 'ONWARDTEC', 
+            'SILGO', 'CUPID', 'AWHCL', 'MAGSON', 'CUBEXTUB', 'IBULLSLTD', 
+            'ARMOUR', 'ECOSMOBLTY', 'CSSL', 'MTNL', 'RAYMONDLSL', 'RAYMONDREL', 
+            'SOUTHBANK', 'MTARTECH', 'ASHWINI', 'IITL', 'AURIGROW', 'SPRL', 
+            'INTENTECH', 'PRECAM', 'OMAXAUTO', 'MHLXMIRU', 'KRMAYURVED', 'KCK', 
+            'DREDGECORP', 'ANNAPURNA', 'AEROFLEX', 'MALLCOM', 'JKIPL', 'VICTORYEV', 
+            'ANTELOPUS', 'GANGAFORGE', 'TEJASNET', 'EXCELINDUS', 'INDIGRID', 
+            'BHARATWIRE', 'MUNISH', 'LANDMARK', 'MAHLOG', 'MAXVOLT', 'OBCL', 
+            'TNPL', 'DAVANGERE', 'SINTERCOM', 'MANAKALUCO', 'EKC', 'AGIIL', 
+            'HOMEFIRST', 'NIKITA', 'OMFURN', 'RACLGEAR', 'VLEGOV', 'ONDOOR', 
+            'JTLIND', 'BAJAJCON', 'TANLA', 'RMDRIP', 'RATEGAIN', 'MEDICO', 
+            'RALLIS', 'RKSWAMY', 'SBC', 'SIGACHI', 'ARISINFRA', 'SHREEJISPG', 
+            'BLUEPEBBLE', 'AEROENTER', 'RNBDENIMS', 'KSR', 'EXCELLENT', 'GENESYS', 
+            'BAGDIGITAL', 'DBEIL', 'DCXINDIA', 'AHCL', 'STYLEBAAZA', 'KALYANKJIL', 
+            'RBA', 'VPRPL', 'TFCILTD', 'KRISHPP', 'TBZ', 'KANDARP', 'PROPEQUITY', 
+            'PATELRMART', 'BAJAJELEC', 'AVANA', 'ABFRL', 'JARO', 'DHARAN', 
+            'JINDALSAW', 'VIVIMEDLAB', 'VINEETLAB', 'PRIMECAB', 'ARFIN', 'AMDIND', 
+            'CAPTRUST', 'BHARATCOAL', 'CONNPLEX', 'INVICTA', 'ATALREAL', 'PIGL', 
+            'IDEALTECHO', 'SPMLINFRA', 'KERNEX', 'SHRINGARMS', 'ARSSBL', 'SOCL', 
+            'BESTAGRO', 'PURVA', 'KIRIINDUS', 'QUADFUTURE', 'AAATECH', 'AAVAS', 
+            'BALAMINES', 'AVROIND', 'DCMFINSERV', 'INDOWIND', 'JWL', 'GARUDA', 
+            'BALUFORGE', 'TARMAT', 'OMAXE', 'JALAN', 'KHANDSE', 'KRYSTAL', 
+            'ORIENTTECH', 'MCL', 'AUSOMENT', 'MAITHANALL', 'KESORAMIND', 
+            'MIRCELECTR', 'IEX', 'MACOBSTECH', 'MRIL', 'BLISSGVS', 'MODIS', 
+            'TIMESCAN', 'AKASH', 'PANACEABIO', 'SHANTIGOLD', 'DHRUV', 'MANGALAM', 
+            'EXXARO', 'KAMOPAINTS', 'DEEDEV', 'E2ERAIL', 'RICOAUTO', 'EIMCOELECO', 
+            'TARIL', 'SANGANI', 'KROSS', 'SILVERTUC', 'SENCO', 'HILTON-RE1', 
+            'FABTECH', 'TVTODAY', 'ARIHANTCAP', 'RADHIKAJWE', 'QUADPRO', 'GKSL', 
+            'GATECH', 'ESFL', 'DIVYADHAN', 'SHANKARA', 'SPEB', 'SARTELE', 
+            'GANDHAR', 'VCL', 'KAYNES', 'ADVANCE', 'GMBREW', 'DHARIWAL', 
+            'DHARARAIL', 'DELPHIFX', 'MINDTECK', 'RAJOOENG', 'SUPREME', 'ENVIRO', 
+            'EXIMROUTES', 'CURIS', 'MILTON', 'FIRSTCRY', 'TEMBO', 'TAKE', 
+            'MPEL', 'NETWEB', 'SMCGLOBAL', 'FILATFASH', 'IGARASHI', 'SHYAMDHANI', 
+            'DURLAX', 'AROGRANITE', 'ZFCVINDIA', 'MARC', 'IDEA', 'GANESHIN'
+        ],
+        'enabled': True,
+        'is_priority': True  # Check this group first
     }
 }
 
@@ -722,42 +735,68 @@ def webhook_router():
         # Route to appropriate groups based on keywords
         message_upper = str(raw_data).upper()
         routed_to = []
+        matched_groups = set()  # Track which groups already matched to avoid duplicates
         
         print(f"🔍 Searching for keywords in: {message_upper[:100]}", flush=True)
         
+        # 🔥 STEP 1: Check Institution Buying FIRST (Priority)
+        institution_group = GROUPS.get('INSTITUTION')
+        institution_stock_found = None
+        
+        if institution_group and institution_group['enabled'] and institution_group.get('is_priority'):
+            for keyword in institution_group['keywords']:
+                if keyword.upper() in message_upper:
+                    institution_stock_found = keyword
+                    group_id = institution_group['group_id']
+                    group_name = institution_group['name']
+                    
+                    print(f"   ✅ INSTITUTION STOCK MATCH! '{keyword}' found!", flush=True)
+                    
+                    if group_id not in matched_groups:
+                        add_to_buffer(group_id, group_name, str(raw_data), keyword)
+                        routed_to.append({'group_name': group_name})
+                        matched_groups.add(group_id)
+                    
+                    break  # Only need one stock match
+        
+        # 🔥 STEP 2: Check CASH + Institution Stock for dual-send
+        has_cash = 'CASH' in message_upper
+        if has_cash and institution_stock_found:
+            cash_group = GROUPS.get('CASH')
+            if cash_group and cash_group['enabled']:
+                group_id = cash_group['group_id']
+                group_name = cash_group['name']
+                
+                print(f"   ✅ CASH + INSTITUTION STOCK! Dual-sending to CASH group too!", flush=True)
+                
+                if group_id not in matched_groups:
+                    add_to_buffer(group_id, group_name, str(raw_data), f"CASH+{institution_stock_found}")
+                    routed_to.append({'group_name': group_name})
+                    matched_groups.add(group_id)
+        
+        # 🔥 STEP 3: Regular routing for all other groups
         for group_key, group_config in GROUPS.items():
             if not group_config['enabled']:
                 print(f"⏸️  Skipping disabled group: {group_config['name']}", flush=True)
                 continue
             
+            # Skip Institution group (already checked) and skip CASH if already matched above
+            if group_config.get('is_priority'):
+                continue
+            
             for keyword in group_config['keywords']:
                 print(f"   Checking keyword '{keyword}' in message...", flush=True)
-                
-                # Check if ALL words in keyword are present in message (not exact phrase)
-                keyword_words = keyword.upper().split()
-                all_words_present = all(word in message_upper for word in keyword_words)
-                
-                if all_words_present:
+                if keyword.upper() in message_upper:
                     group_id = group_config['group_id']
                     group_name = group_config['name']
                     
-                    print(f"   ✅ MATCH! All words from '{keyword}' found in message!", flush=True)
+                    print(f"   ✅ MATCH! Keyword '{keyword}' found!", flush=True)
                     
-                    # Add to buffer
-                    add_to_buffer(group_id, group_name, str(raw_data), keyword)
-                    routed_to.append({'group_name': group_name})
-                    
-                    # If this group has a parent_group, also send to parent
-                    if 'parent_group' in group_config:
-                        parent_key = group_config['parent_group']
-                        if parent_key in GROUPS and GROUPS[parent_key]['enabled']:
-                            parent_config = GROUPS[parent_key]
-                            parent_id = parent_config['group_id']
-                            parent_name = parent_config['name']
-                            
-                            print(f"   📤 Also sending to PARENT group: {parent_name}", flush=True)
-                            add_to_buffer(parent_id, parent_name, str(raw_data), keyword)
-                            routed_to.append({'group_name': parent_name + ' (parent)'})
+                    # Avoid duplicate sends
+                    if group_id not in matched_groups:
+                        add_to_buffer(group_id, group_name, str(raw_data), keyword)
+                        routed_to.append({'group_name': group_name})
+                        matched_groups.add(group_id)
                     
                     break
                 else:
