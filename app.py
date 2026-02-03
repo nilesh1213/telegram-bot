@@ -129,47 +129,67 @@ GROUPS = {
         'keywords': ['CRYPTO'],
         'enabled': True
     },
+    'CASH_REVERSAL_LONG': {
+        'name': 'Cash Reversal Long',
+        'group_id': os.environ.get('CASH_REVERSAL_LONG_GROUP_ID', '-5260394162'),
+        'keywords': ['CASH', 'REVERSAL', 'LONG'],
+        'enabled': True,
+        'parent_group': 'CASH'  # Also sends to Cash Intraday
+    },
+    'ZONE_REVERSAL_LONG': {
+        'name': 'Zone Reversal Long',
+        'group_id': os.environ.get('ZONE_REVERSAL_LONG_GROUP_ID', '-5148485546'),
+        'keywords': ['ZONE', 'REVERSAL', 'LONG'],
+        'enabled': True,
+        'parent_group': 'ZONE'  # Also sends to Zone Signals
+    },
+    'ZONE_REVERSAL_SHORT': {
+        'name': 'Zone Reversal Short',
+        'group_id': os.environ.get('ZONE_REVERSAL_SHORT_GROUP_ID', '-5100210062'),
+        'keywords': ['ZONE', 'REVERSAL', 'SHORT'],
+        'enabled': True,
+        'parent_group': 'ZONE'  # Also sends to Zone Signals
+    },
     'INSTITUTION': {
         'name': 'Institution Buying Shares',
         'group_id': os.environ.get('INSTITUTION_GROUP_ID', '-1003517861259'),
         'keywords': [
- '3IINFOLTD','AAATECH','AAREYDRUGS','AAVAS','ABFRL','ADVANCE','AEROENTER',
- 'AEROFLEX','AGIIL','AHCL','AKASH','AMDIND','ANANTRAJ','ANGELONE',
- 'ANNAPURNA','ANTELOPUS','APEX','ARFIN','ARIHANTCAP','ARISINFRA',
- 'ARMOUR','ARSSBL','ASHWINI','ATALREAL','AURIGROW','AUSOMENT','AVANA',
- 'AVROIND','AWHCL','BAGDIGITAL','BAJAJCON','BAJAJELEC','BALAMINES',
- 'BALUFORGE','BESTAGRO','BHARATCOAL','BHARATWIRE','BLISSGVS',
- 'BLUEPEBBLE','BSE','CAPTRUST','CLEAN','CONNPLEX','CSSL','CUBEXTUB',
- 'CUPID','CURIS','DAVANGERE','DBEIL','DCMFINSERV','DCXINDIA','DEEDEV',
- 'DELPHIFX','DHARAN','DHARARAIL','DHARIWAL','DHRUV','DIVYADHAN',
- 'DLINKINDIA','DREDGECORP','E2ERAIL','ECOSMOBLTY','EEPL','EIMCOELECO',
- 'EKC','ENCOMPAS','ENVIRO','EPWINDIA','ESFL','EXCELINDUS','EXCELLENT',
- 'EXIMROUTES','EXXARO','FABTECH','FIRSTCRY','GANDHAR','GANGAFORGE',
- 'GARUDA','GATECH','GCSL','GENESYS','GKSL','GMBREW','GOKEX',
- 'GOYALALUM','GREENLEAF','GSS','HILTON-RE1','HINDCOPPER','HOMEFIRST',
- 'IBULLSLTD','IDEALTECHO','IEX','IITL','INDIGRID','INDOBORAX',
- 'INDOTHAI','INDOWIND','INNOMET','INTENTECH','INVICTA','JALAN','JARO',
- 'JINDALSAW','JKIPL','JTLIND','JWL','KALANA','KALYANKJIL','KAMOPAINTS',
- 'KANDARP','KAYNES','KCK','KERNEX','KESORAMIND','KHANDSE','KIRIINDUS',
- 'KRIDHANINF','KRISHNADEF','KRISHPP','KRMAYURVED','KROSS','KRYSTAL',
- 'KSR','LANDMARK','MACOBSTECH','MAGSON','MAHLOG','MAITHANALL','MALLCOM',
- 'MANAKALUCO','MANGALAM','MAXVOLT','MCL','MCX','MEDICO','MEIL',
- 'MHLXMIRU','MILTON','MINDTECK','MIRCELECTR','MODIS','MOXSH','MPEL',
- 'MRIL','MTARTECH','MTNL','MUNISH','MWL','NETWEB','NEWJAISA','NIKITA',
- 'OBCL','OLIL','OMAXAUTO','OMAXE','OMFREIGHT','OMFURN','ONDOOR',
- 'ONWARDTEC','ORIENTTECH','PANACEABIO','PATELENG','PATELRMART','PIGL',
- 'POLYCAB','POLYMED','PRECAM','PRIMECAB','PROPEQUITY','PURVA',
- 'QUADFUTURE','QUADPRO','RACLGEAR','RADHIKAJWE','RAJOOENG','RALLIS',
- 'RAMASTEEL','RATEGAIN','RATNAVEER','RAYMONDLSL','RAYMONDREL','RBA',
- 'RCDL','RICOAUTO','RKSWAMY','RMDRIP','RNBDENIMS','RNPL','RUDRA',
- 'SANGANI','SARTELE','SBC','SENCO','SHANKARA','SHANTIGOLD',
- 'SHREEJISPG','SHRIKANHA','SHRINGARMS','SIGACHI','SILGO','SILVERTUC',
- 'SINDHUTRAD','SINTERCOM','SOCL','SOUTHBANK','SPEB','SPMLINFRA',
- 'SPRL','STYLEBAAZA','SUPREME','TAKE','TANLA','TARIL','TARMAT','TBZ',
- 'TEJASNET','TEMBO','TFCILTD','TIMESCAN','TNPL','TVTODAY','UFBL',
- 'VCL','VICTORYEV','VIJAYPD','VINEET-RE','VINEETLAB','VIVIMEDLAB',
- 'VLEGOV','VOLERCAR','VPRPL','WALCHANNAG','ZENITHSTL'
-],
+            'VIJAYPD', 'WALCHANNAG', 'APEX', 'KRISHNADEF', 'OLIL', 'RATNAVEER', 
+            'HINDCOPPER', 'ANGELONE', 'ANANTRAJ', 'BSE', 'MCX', 'ONWARDTEC', 
+            'SILGO', 'CUPID', 'AWHCL', 'MAGSON', 'CUBEXTUB', 'IBULLSLTD', 
+            'ARMOUR', 'ECOSMOBLTY', 'CSSL', 'MTNL', 'RAYMONDLSL', 'RAYMONDREL', 
+            'SOUTHBANK', 'MTARTECH', 'ASHWINI', 'IITL', 'AURIGROW', 'SPRL', 
+            'INTENTECH', 'PRECAM', 'OMAXAUTO', 'MHLXMIRU', 'KRMAYURVED', 'KCK', 
+            'DREDGECORP', 'ANNAPURNA', 'AEROFLEX', 'MALLCOM', 'JKIPL', 'VICTORYEV', 
+            'ANTELOPUS', 'GANGAFORGE', 'TEJASNET', 'EXCELINDUS', 'INDIGRID', 
+            'BHARATWIRE', 'MUNISH', 'LANDMARK', 'MAHLOG', 'MAXVOLT', 'OBCL', 
+            'TNPL', 'DAVANGERE', 'SINTERCOM', 'MANAKALUCO', 'EKC', 'AGIIL', 
+            'HOMEFIRST', 'NIKITA', 'OMFURN', 'RACLGEAR', 'VLEGOV', 'ONDOOR', 
+            'JTLIND', 'BAJAJCON', 'TANLA', 'RMDRIP', 'RATEGAIN', 'MEDICO', 
+            'RALLIS', 'RKSWAMY', 'SBC', 'SIGACHI', 'ARISINFRA', 'SHREEJISPG', 
+            'BLUEPEBBLE', 'AEROENTER', 'RNBDENIMS', 'KSR', 'EXCELLENT', 'GENESYS', 
+            'BAGDIGITAL', 'DBEIL', 'DCXINDIA', 'AHCL', 'STYLEBAAZA', 'KALYANKJIL', 
+            'RBA', 'VPRPL', 'TFCILTD', 'KRISHPP', 'TBZ', 'KANDARP', 'PROPEQUITY', 
+            'PATELRMART', 'BAJAJELEC', 'AVANA', 'ABFRL', 'JARO', 'DHARAN', 
+            'JINDALSAW', 'VIVIMEDLAB', 'VINEETLAB', 'PRIMECAB', 'ARFIN', 'AMDIND', 
+            'CAPTRUST', 'BHARATCOAL', 'CONNPLEX', 'INVICTA', 'ATALREAL', 'PIGL', 
+            'IDEALTECHO', 'SPMLINFRA', 'KERNEX', 'SHRINGARMS', 'ARSSBL', 'SOCL', 
+            'BESTAGRO', 'PURVA', 'KIRIINDUS', 'QUADFUTURE', 'AAATECH', 'AAVAS', 
+            'BALAMINES', 'AVROIND', 'DCMFINSERV', 'INDOWIND', 'JWL', 'GARUDA', 
+            'BALUFORGE', 'TARMAT', 'OMAXE', 'JALAN', 'KHANDSE', 'KRYSTAL', 
+            'ORIENTTECH', 'MCL', 'AUSOMENT', 'MAITHANALL', 'KESORAMIND', 
+            'MIRCELECTR', 'IEX', 'MACOBSTECH', 'MRIL', 'BLISSGVS', 'MODIS', 
+            'TIMESCAN', 'AKASH', 'PANACEABIO', 'SHANTIGOLD', 'DHRUV', 'MANGALAM', 
+            'EXXARO', 'KAMOPAINTS', 'DEEDEV', 'E2ERAIL', 'RICOAUTO', 'EIMCOELECO', 
+            'TARIL', 'SANGANI', 'KROSS', 'SILVERTUC', 'SENCO', 'HILTON-RE1', 
+            'FABTECH', 'TVTODAY', 'ARIHANTCAP', 'RADHIKAJWE', 'QUADPRO', 'GKSL', 
+            'GATECH', 'ESFL', 'DIVYADHAN', 'SHANKARA', 'SPEB', 'SARTELE', 
+            'GANDHAR', 'VCL', 'KAYNES', 'ADVANCE', 'GMBREW', 'DHARIWAL', 
+            'DHARARAIL', 'DELPHIFX', 'MINDTECK', 'RAJOOENG', 'SUPREME', 'ENVIRO', 
+            'EXIMROUTES', 'CURIS', 'MILTON', 'FIRSTCRY', 'TEMBO', 'TAKE', 
+            'MPEL', 'NETWEB', 'SMCGLOBAL', 'FILATFASH', 'IGARASHI', 'SHYAMDHANI', 
+            'DURLAX', 'AROGRANITE', 'ZFCVINDIA', 'MARC', 'IDEA', 'GANESHIN'
+        ],
         'enabled': True,
         'is_priority': True  # Check this group first
     }
@@ -781,14 +801,52 @@ def webhook_router():
                     routed_to.append({'group_name': group_name})
                     matched_groups.add(group_id)
         
-        # 🔥 STEP 3: Regular routing for all other groups
+        # 🔥 STEP 3: Check Reversal Groups (flexible word match - ALL words must be present anywhere)
+        REVERSAL_GROUPS = ['CASH_REVERSAL_LONG', 'ZONE_REVERSAL_LONG', 'ZONE_REVERSAL_SHORT']
+        
+        for rev_key in REVERSAL_GROUPS:
+            rev_group = GROUPS.get(rev_key)
+            if not rev_group or not rev_group['enabled']:
+                continue
+            
+            # Check if ALL keywords present anywhere in message (flexible matching)
+            all_words_found = all(word.upper() in message_upper for word in rev_group['keywords'])
+            
+            if all_words_found:
+                group_id = rev_group['group_id']
+                group_name = rev_group['name']
+                
+                print(f"   ✅ REVERSAL MATCH! '{rev_key}' - all words found!", flush=True)
+                
+                # Send to reversal group
+                if group_id not in matched_groups:
+                    add_to_buffer(group_id, group_name, str(raw_data), ' '.join(rev_group['keywords']))
+                    routed_to.append({'group_name': group_name})
+                    matched_groups.add(group_id)
+                
+                # Send to parent group too
+                parent_key = rev_group.get('parent_group')
+                if parent_key:
+                    parent_group = GROUPS.get(parent_key)
+                    if parent_group and parent_group['enabled']:
+                        parent_id = parent_group['group_id']
+                        parent_name = parent_group['name']
+                        
+                        print(f"   ✅ DUAL-SEND to parent: {parent_name}", flush=True)
+                        
+                        if parent_id not in matched_groups:
+                            add_to_buffer(parent_id, parent_name, str(raw_data), f"{rev_key}→{parent_key}")
+                            routed_to.append({'group_name': parent_name})
+                            matched_groups.add(parent_id)
+        
+        # 🔥 STEP 4: Regular routing for all other groups
         for group_key, group_config in GROUPS.items():
             if not group_config['enabled']:
                 print(f"⏸️  Skipping disabled group: {group_config['name']}", flush=True)
                 continue
             
-            # Skip Institution group (already checked) and skip CASH if already matched above
-            if group_config.get('is_priority'):
+            # Skip Institution (already checked in STEP 1) and Reversal groups (already checked in STEP 3)
+            if group_config.get('is_priority') or group_config.get('parent_group'):
                 continue
             
             for keyword in group_config['keywords']:
@@ -1141,4 +1199,4 @@ if __name__ == '__main__':
     print()
     
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)
