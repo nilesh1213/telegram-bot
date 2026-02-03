@@ -58,6 +58,92 @@ else:
                 DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
         print(f"🔧 Using {DATABASE_TYPE.upper()} database from environment")
 
+# Google Sheets - Published CSV URL for Institution Buying stocks (fetched every 5 min)
+GOOGLE_SHEETS_CSV_URL = os.environ.get('GOOGLE_SHEETS_CSV_URL', 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ__Ekh4dVf6dXsVcExivA9OZc2fPAoyRL8gMZ-O7PGrQgGqMln3W5_EBvWmBu53EyJGTawe2fOzBbA/pub?output=csv')
+
+# Cache for institution stocks
+institution_stocks_cache = []
+institution_stocks_last_fetch = 0  # timestamp
+CACHE_DURATION = 300  # 5 minutes
+
+def fetch_institution_stocks():
+    """Fetch stock list from Google Sheets. Cache for 5 min. Fallback to hardcoded list."""
+    global institution_stocks_cache, institution_stocks_last_fetch
+    
+    now = time.time()
+    # Return cached if fresh (within 5 min)
+    if institution_stocks_cache and (now - institution_stocks_last_fetch) < CACHE_DURATION:
+        return institution_stocks_cache
+    
+    try:
+        print("📊 Fetching institution stocks from Google Sheets...", flush=True)
+        response = requests.get(GOOGLE_SHEETS_CSV_URL, timeout=10)
+        if response.status_code == 200:
+            stocks = []
+            for line in response.text.strip().split('\n'):
+                stock = line.strip().strip('"').upper()
+                if stock and stock != '':
+                    stocks.append(stock)
+            
+            if stocks:
+                institution_stocks_cache = stocks
+                institution_stocks_last_fetch = now
+                print(f"✅ Fetched {len(stocks)} stocks from Google Sheets", flush=True)
+                return stocks
+            else:
+                print("⚠️ Google Sheets returned empty - using cache/fallback", flush=True)
+        else:
+            print(f"⚠️ Google Sheets returned {response.status_code} - using cache/fallback", flush=True)
+    except Exception as e:
+        print(f"⚠️ Google Sheets fetch failed: {e} - using cache/fallback", flush=True)
+    
+    # Return cache if available, else fallback
+    if institution_stocks_cache:
+        return institution_stocks_cache
+    return INSTITUTION_STOCKS_FALLBACK
+
+# Fallback list if Google Sheets unreachable
+INSTITUTION_STOCKS_FALLBACK = [
+    'VIJAYPD', 'WALCHANNAG', 'APEX', 'KRISHNADEF', 'OLIL', 'RATNAVEER', 
+    'HINDCOPPER', 'ANGELONE', 'ANANTRAJ', 'BSE', 'MCX', 'ONWARDTEC', 
+    'SILGO', 'CUPID', 'AWHCL', 'MAGSON', 'CUBEXTUB', 'IBULLSLTD', 
+    'ARMOUR', 'ECOSMOBLTY', 'CSSL', 'MTNL', 'RAYMONDLSL', 'RAYMONDREL', 
+    'SOUTHBANK', 'MTARTECH', 'ASHWINI', 'IITL', 'AURIGROW', 'SPRL', 
+    'INTENTECH', 'PRECAM', 'OMAXAUTO', 'MHLXMIRU', 'KRMAYURVED', 'KCK', 
+    'DREDGECORP', 'ANNAPURNA', 'AEROFLEX', 'MALLCOM', 'JKIPL', 'VICTORYEV', 
+    'ANTELOPUS', 'GANGAFORGE', 'TEJASNET', 'EXCELINDUS', 'INDIGRID', 
+    'BHARATWIRE', 'MUNISH', 'LANDMARK', 'MAHLOG', 'MAXVOLT', 'OBCL', 
+    'TNPL', 'DAVANGERE', 'SINTERCOM', 'MANAKALUCO', 'EKC', 'AGIIL', 
+    'HOMEFIRST', 'NIKITA', 'OMFURN', 'RACLGEAR', 'VLEGOV', 'ONDOOR', 
+    'JTLIND', 'BAJAJCON', 'TANLA', 'RMDRIP', 'RATEGAIN', 'MEDICO', 
+    'RALLIS', 'RKSWAMY', 'SBC', 'SIGACHI', 'ARISINFRA', 'SHREEJISPG', 
+    'BLUEPEBBLE', 'AEROENTER', 'RNBDENIMS', 'KSR', 'EXCELLENT', 'GENESYS', 
+    'BAGDIGITAL', 'DBEIL', 'DCXINDIA', 'AHCL', 'STYLEBAAZA', 'KALYANKJIL', 
+    'RBA', 'VPRPL', 'TFCILTD', 'KRISHPP', 'TBZ', 'KANDARP', 'PROPEQUITY', 
+    'PATELRMART', 'BAJAJELEC', 'AVANA', 'ABFRL', 'JARO', 'DHARAN', 
+    'JINDALSAW', 'VIVIMEDLAB', 'VINEETLAB', 'PRIMECAB', 'ARFIN', 'AMDIND', 
+    'CAPTRUST', 'BHARATCOAL', 'CONNPLEX', 'INVICTA', 'ATALREAL', 'PIGL', 
+    'IDEALTECHO', 'SPMLINFRA', 'KERNEX', 'SHRINGARMS', 'ARSSBL', 'SOCL', 
+    'BESTAGRO', 'PURVA', 'KIRIINDUS', 'QUADFUTURE', 'AAATECH', 'AAVAS', 
+    'BALAMINES', 'AVROIND', 'DCMFINSERV', 'INDOWIND', 'JWL', 'GARUDA', 
+    'BALUFORGE', 'TARMAT', 'OMAXE', 'JALAN', 'KHANDSE', 'KRYSTAL', 
+    'ORIENTTECH', 'MCL', 'AUSOMENT', 'MAITHANALL', 'KESORAMIND', 
+    'MIRCELECTR', 'IEX', 'MACOBSTECH', 'MRIL', 'BLISSGVS', 'MODIS', 
+    'TIMESCAN', 'AKASH', 'PANACEABIO', 'SHANTIGOLD', 'DHRUV', 'MANGALAM', 
+    'EXXARO', 'KAMOPAINTS', 'DEEDEV', 'E2ERAIL', 'RICOAUTO', 'EIMCOELECO', 
+    'TARIL', 'SANGANI', 'KROSS', 'SILVERTUC', 'SENCO', 'HILTON-RE1', 
+    'FABTECH', 'TVTODAY', 'ARIHANTCAP', 'RADHIKAJWE', 'QUADPRO', 'GKSL', 
+    'GATECH', 'ESFL', 'DIVYADHAN', 'SHANKARA', 'SPEB', 'SARTELE', 
+    'GANDHAR', 'VCL', 'KAYNES', 'ADVANCE', 'GMBREW', 'DHARIWAL', 
+    'DHARARAIL', 'DELPHIFX', 'MINDTECK', 'RAJOOENG', 'SUPREME', 'ENVIRO', 
+    'EXIMROUTES', 'CURIS', 'MILTON', 'FIRSTCRY', 'TEMBO', 'TAKE', 
+    'MPEL', 'NETWEB', 'SMCGLOBAL', 'FILATFASH', 'IGARASHI', 'SHYAMDHANI', 
+    'DURLAX', 'AROGRANITE', 'ZFCVINDIA', 'MARC', 'IDEA', 'GANESHIN'
+]
+
+# Pre-fetch on startup
+institution_stocks_cache = fetch_institution_stocks()
+
 # ═══════════════════════════════════════════════════════════════════════════
 # 📋 GROUPS CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════
@@ -153,43 +239,7 @@ GROUPS = {
     'INSTITUTION': {
         'name': 'Institution Buying Shares',
         'group_id': os.environ.get('INSTITUTION_GROUP_ID', '-1003517861259'),
-        'keywords': [
-            'VIJAYPD', 'WALCHANNAG', 'APEX', 'KRISHNADEF', 'OLIL', 'RATNAVEER', 
-            'HINDCOPPER', 'ANGELONE', 'ANANTRAJ', 'BSE', 'MCX', 'ONWARDTEC', 
-            'SILGO', 'CUPID', 'AWHCL', 'MAGSON', 'CUBEXTUB', 'IBULLSLTD', 
-            'ARMOUR', 'ECOSMOBLTY', 'CSSL', 'MTNL', 'RAYMONDLSL', 'RAYMONDREL', 
-            'SOUTHBANK', 'MTARTECH', 'ASHWINI', 'IITL', 'AURIGROW', 'SPRL', 
-            'INTENTECH', 'PRECAM', 'OMAXAUTO', 'MHLXMIRU', 'KRMAYURVED', 'KCK', 
-            'DREDGECORP', 'ANNAPURNA', 'AEROFLEX', 'MALLCOM', 'JKIPL', 'VICTORYEV', 
-            'ANTELOPUS', 'GANGAFORGE', 'TEJASNET', 'EXCELINDUS', 'INDIGRID', 
-            'BHARATWIRE', 'MUNISH', 'LANDMARK', 'MAHLOG', 'MAXVOLT', 'OBCL', 
-            'TNPL', 'DAVANGERE', 'SINTERCOM', 'MANAKALUCO', 'EKC', 'AGIIL', 
-            'HOMEFIRST', 'NIKITA', 'OMFURN', 'RACLGEAR', 'VLEGOV', 'ONDOOR', 
-            'JTLIND', 'BAJAJCON', 'TANLA', 'RMDRIP', 'RATEGAIN', 'MEDICO', 
-            'RALLIS', 'RKSWAMY', 'SBC', 'SIGACHI', 'ARISINFRA', 'SHREEJISPG', 
-            'BLUEPEBBLE', 'AEROENTER', 'RNBDENIMS', 'KSR', 'EXCELLENT', 'GENESYS', 
-            'BAGDIGITAL', 'DBEIL', 'DCXINDIA', 'AHCL', 'STYLEBAAZA', 'KALYANKJIL', 
-            'RBA', 'VPRPL', 'TFCILTD', 'KRISHPP', 'TBZ', 'KANDARP', 'PROPEQUITY', 
-            'PATELRMART', 'BAJAJELEC', 'AVANA', 'ABFRL', 'JARO', 'DHARAN', 
-            'JINDALSAW', 'VIVIMEDLAB', 'VINEETLAB', 'PRIMECAB', 'ARFIN', 'AMDIND', 
-            'CAPTRUST', 'BHARATCOAL', 'CONNPLEX', 'INVICTA', 'ATALREAL', 'PIGL', 
-            'IDEALTECHO', 'SPMLINFRA', 'KERNEX', 'SHRINGARMS', 'ARSSBL', 'SOCL', 
-            'BESTAGRO', 'PURVA', 'KIRIINDUS', 'QUADFUTURE', 'AAATECH', 'AAVAS', 
-            'BALAMINES', 'AVROIND', 'DCMFINSERV', 'INDOWIND', 'JWL', 'GARUDA', 
-            'BALUFORGE', 'TARMAT', 'OMAXE', 'JALAN', 'KHANDSE', 'KRYSTAL', 
-            'ORIENTTECH', 'MCL', 'AUSOMENT', 'MAITHANALL', 'KESORAMIND', 
-            'MIRCELECTR', 'IEX', 'MACOBSTECH', 'MRIL', 'BLISSGVS', 'MODIS', 
-            'TIMESCAN', 'AKASH', 'PANACEABIO', 'SHANTIGOLD', 'DHRUV', 'MANGALAM', 
-            'EXXARO', 'KAMOPAINTS', 'DEEDEV', 'E2ERAIL', 'RICOAUTO', 'EIMCOELECO', 
-            'TARIL', 'SANGANI', 'KROSS', 'SILVERTUC', 'SENCO', 'HILTON-RE1', 
-            'FABTECH', 'TVTODAY', 'ARIHANTCAP', 'RADHIKAJWE', 'QUADPRO', 'GKSL', 
-            'GATECH', 'ESFL', 'DIVYADHAN', 'SHANKARA', 'SPEB', 'SARTELE', 
-            'GANDHAR', 'VCL', 'KAYNES', 'ADVANCE', 'GMBREW', 'DHARIWAL', 
-            'DHARARAIL', 'DELPHIFX', 'MINDTECK', 'RAJOOENG', 'SUPREME', 'ENVIRO', 
-            'EXIMROUTES', 'CURIS', 'MILTON', 'FIRSTCRY', 'TEMBO', 'TAKE', 
-            'MPEL', 'NETWEB', 'SMCGLOBAL', 'FILATFASH', 'IGARASHI', 'SHYAMDHANI', 
-            'DURLAX', 'AROGRANITE', 'ZFCVINDIA', 'MARC', 'IDEA', 'GANESHIN'
-        ],
+        'keywords': [],  # Fetched dynamically from Google Sheets
         'enabled': True,
         'is_priority': True  # Check this group first
     }
@@ -804,7 +854,9 @@ def webhook_router():
         institution_stock_found = None
         
         if institution_group and institution_group['enabled'] and institution_group.get('is_priority'):
-            for keyword in institution_group['keywords']:
+            # Fetch fresh stock list from Google Sheets (cached 5 min)
+            institution_keywords = fetch_institution_stocks()
+            for keyword in institution_keywords:
                 if keyword.upper() in message_upper:
                     institution_stock_found = keyword
                     print(f"   📌 INSTITUTION STOCK FOUND: '{keyword}' - waiting for CASH+LONG check", flush=True)
@@ -1002,11 +1054,13 @@ def api_groups():
     groups_list = []
     
     for key, config in GROUPS.items():
+        # For INSTITUTION, return live stock list from Google Sheets
+        keywords = fetch_institution_stocks() if key == 'INSTITUTION' else config['keywords']
         groups_list.append({
             'key': key,
             'name': config['name'],
             'group_id': config['group_id'],
-            'keywords': config['keywords'],
+            'keywords': keywords,
             'enabled': config['enabled']
         })
     
@@ -1265,6 +1319,27 @@ def check_bot_permissions(group_id):
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/debug/sheets', methods=['GET'])
+def debug_sheets():
+    """Debug Google Sheets fetch - shows exact URL, status, response"""
+    try:
+        print(f"🔍 DEBUG: Fetching {GOOGLE_SHEETS_CSV_URL}", flush=True)
+        response = requests.get(GOOGLE_SHEETS_CSV_URL, timeout=10)
+        return jsonify({
+            'url': GOOGLE_SHEETS_CSV_URL,
+            'status_code': response.status_code,
+            'response_text': response.text[:500],
+            'cache_count': len(institution_stocks_cache),
+            'cache_stocks': institution_stocks_cache[:10]
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'url': GOOGLE_SHEETS_CSV_URL,
+            'error': str(e),
+            'cache_count': len(institution_stocks_cache),
+            'cache_stocks': institution_stocks_cache[:10]
+        }), 500
 
 @app.route('/health', methods=['GET'])
 def health():
