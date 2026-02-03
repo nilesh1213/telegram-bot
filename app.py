@@ -131,21 +131,21 @@ GROUPS = {
     },
     'CASH_REVERSAL_LONG': {
         'name': 'Cash Reversal Long',
-        'group_id': os.environ.get('CASH_REVERSAL_LONG_GROUP_ID', '-5260394162'),
+        'group_id': os.environ.get('CASH_REVERSAL_LONG_GROUP_ID', '-1003557486410'),
         'keywords': ['CASH', 'REVERSAL', 'LONG'],
         'enabled': True,
         'parent_group': 'CASH'  # Also sends to Cash Intraday
     },
     'ZONE_REVERSAL_LONG': {
         'name': 'Zone Reversal Long',
-        'group_id': os.environ.get('ZONE_REVERSAL_LONG_GROUP_ID', '-5148485546'),
+        'group_id': os.environ.get('ZONE_REVERSAL_LONG_GROUP_ID', '-1003763196446'),
         'keywords': ['ZONE', 'REVERSAL', 'LONG'],
         'enabled': True,
         'parent_group': 'ZONE'  # Also sends to Zone Signals
     },
     'ZONE_REVERSAL_SHORT': {
         'name': 'Zone Reversal Short',
-        'group_id': os.environ.get('ZONE_REVERSAL_SHORT_GROUP_ID', '-5100210062'),
+        'group_id': os.environ.get('ZONE_REVERSAL_SHORT_GROUP_ID', '-1003887891053'),
         'keywords': ['ZONE', 'REVERSAL', 'SHORT'],
         'enabled': True,
         'parent_group': 'ZONE'  # Also sends to Zone Signals
@@ -264,6 +264,34 @@ buffer_thread.start()
 print("✅ Buffer thread started")
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 🗑️ WEEKLY MESSAGE CLEANUP (only messages table, nothing else)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def cleanup_old_messages():
+    """Background thread - deletes messages older than 7 days every week"""
+    while True:
+        time.sleep(604800)  # 7 days in seconds
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            if DATABASE_TYPE == 'sqlite':
+                cursor.execute("DELETE FROM messages WHERE timestamp < datetime('now', '-7 days')")
+            elif DATABASE_TYPE == 'postgresql':
+                cursor.execute("DELETE FROM messages WHERE timestamp < NOW() - INTERVAL '7 days'")
+            
+            deleted = cursor.rowcount
+            conn.commit()
+            conn.close()
+            print(f"🗑️ Weekly cleanup done - deleted {deleted} old messages", flush=True)
+        except Exception as e:
+            print(f"❌ Cleanup error: {e}", flush=True)
+
+cleanup_thread = threading.Thread(target=cleanup_old_messages, daemon=True)
+cleanup_thread.start()
+print("✅ Weekly message cleanup thread started")
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 💾 DATABASE CONNECTION
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -374,17 +402,22 @@ def create_invite_link(group_id, expire_days=30):
     expire_date = int(time.time()) + (expire_days * 86400)
     payload = {'chat_id': int(group_id), 'expire_date': expire_date, 'member_limit': 1}
     
+    print(f"🔄 Creating invite link for group_id={group_id}, payload={payload}", flush=True)
+    
     try:
         response = requests.post(url, json=payload, timeout=10)
-        response.raise_for_status()
         data = response.json()
+        print(f"📩 Telegram response: {data}", flush=True)
         
         if data.get('ok'):
-            return data['result']['invite_link']
-        return None
+            return {'success': True, 'link': data['result']['invite_link']}
+        
+        # Return exact error from Telegram
+        print(f"❌ Telegram error: {data.get('error_code')} - {data.get('description')}", flush=True)
+        return {'success': False, 'error': data.get('description', 'Unknown error')}
     except Exception as e:
-        print(f"❌ Failed to create invite link: {e}")
-        return None
+        print(f"❌ Failed to create invite link: {e}", flush=True)
+        return {'success': False, 'error': str(e)}
 
 def check_user_in_group(group_id, user_id):
     """Check if user is in group"""
@@ -1087,11 +1120,14 @@ def api_add_user():
     group_id = int(group_id)
     user_id = int(user_id)
     
-    invite_link = create_invite_link(group_id, days)
+    invite_result = create_invite_link(group_id, days)
     
-    if not invite_link:
-        return jsonify({'error': 'Failed to create invite link'}), 500
+    if not invite_result.get('success'):
+        actual_error = invite_result.get('error', 'Unknown error')
+        print(f"❌ Invite link failed for group {group_id}: {actual_error}", flush=True)
+        return jsonify({'error': f'Telegram says: {actual_error}'}), 500
     
+    invite_link = invite_result['link']
     add_user(group_id, user_id, days)
     
     message = f"🎉 You've been invited!\n\nValid for: {days} days\nJoin now: {invite_link}"
@@ -1184,6 +1220,50 @@ def api_config():
         'admin_id': ADMIN_USER_ID,
         'database_type': DATABASE_TYPE
     }), 200
+
+
+@app.route('/api/check-bot/<group_id>', methods=['GET'])
+def check_bot_permissions(group_id):
+    """Diagnostic: Check bot permissions on a group"""
+    try:
+        gid = int(group_id)
+        
+        # 1. Check if bot can see the group
+        chat_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChat"
+        chat_resp = requests.post(chat_url, json={'chat_id': gid}, timeout=10)
+        chat_data = chat_resp.json()
+        
+        if not chat_data.get('ok'):
+            return jsonify({'error': f"Cannot access group: {chat_data.get('description')}"}), 200
+        
+        chat_info = chat_data['result']
+        
+        # 2. Check bot own status in the group
+        me_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe"
+        me_resp = requests.get(me_url, timeout=10)
+        me_data = me_resp.json()
+        bot_id = me_data['result']['id']
+        
+        member_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChatMember"
+        member_resp = requests.post(member_url, json={'chat_id': gid, 'user_id': bot_id}, timeout=10)
+        member_data = member_resp.json()
+        
+        # 3. Try creating invite link
+        invite_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/createChatInviteLink"
+        invite_resp = requests.post(invite_url, json={'chat_id': gid, 'expire_date': int(time.time()) + 3600, 'member_limit': 1}, timeout=10)
+        invite_data = invite_resp.json()
+        
+        return jsonify({
+            'group_id': gid,
+            'group_type': chat_info.get('type'),
+            'group_title': chat_info.get('title'),
+            'bot_id': bot_id,
+            'bot_status_in_group': member_data.get('result', {}).get('status', 'NOT FOUND'),
+            'bot_permissions': member_data.get('result', {}),
+            'invite_link_result': invite_data
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 def health():
