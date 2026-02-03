@@ -799,7 +799,7 @@ def webhook_router():
         
         print(f"🔍 Searching for keywords in: {message_upper[:100]}", flush=True)
         
-        # 🔥 STEP 1: Check Institution Buying FIRST (Priority)
+        # 🔥 STEP 1: Find Institution stock keyword (DON'T send yet - wait for CASH+LONG check)
         institution_group = GROUPS.get('INSTITUTION')
         institution_stock_found = None
         
@@ -807,36 +807,37 @@ def webhook_router():
             for keyword in institution_group['keywords']:
                 if keyword.upper() in message_upper:
                     institution_stock_found = keyword
-                    group_id = institution_group['group_id']
-                    group_name = institution_group['name']
-                    
-                    print(f"   ✅ INSTITUTION STOCK MATCH! '{keyword}' found!", flush=True)
-                    
-                    if group_id not in matched_groups:
-                        add_to_buffer(group_id, group_name, str(raw_data), keyword)
-                        routed_to.append({'group_name': group_name})
-                        matched_groups.add(group_id)
-                    
+                    print(f"   📌 INSTITUTION STOCK FOUND: '{keyword}' - waiting for CASH+LONG check", flush=True)
                     break  # Only need one stock match
         
-        # 🔥 STEP 2: Check CASH + Institution Stock for dual-send
-        # CASH always goes to Cash Intraday when institution stock present
+        # 🔥 STEP 2: Institution Buying ONLY when CASH + LONG + stock ALL present
         has_cash = 'CASH' in message_upper
         has_long = 'LONG' in message_upper
         cash_long_institution = has_cash and has_long and institution_stock_found
         
-        if has_cash and institution_stock_found:
+        if cash_long_institution:
+            # Send to Institution Buying
+            group_id = institution_group['group_id']
+            group_name = institution_group['name']
+            print(f"   ✅ CASH + LONG + {institution_stock_found}! Sending to Institution Buying!", flush=True)
+            if group_id not in matched_groups:
+                add_to_buffer(group_id, group_name, str(raw_data), institution_stock_found)
+                routed_to.append({'group_name': group_name})
+                matched_groups.add(group_id)
+            
+            # Also send to Cash Intraday
             cash_group = GROUPS.get('CASH')
             if cash_group and cash_group['enabled']:
-                group_id = cash_group['group_id']
-                group_name = cash_group['name']
-                
-                print(f"   ✅ CASH + INSTITUTION STOCK! Dual-sending to CASH group too!", flush=True)
-                
-                if group_id not in matched_groups:
-                    add_to_buffer(group_id, group_name, str(raw_data), f"CASH+{institution_stock_found}")
-                    routed_to.append({'group_name': group_name})
-                    matched_groups.add(group_id)
+                cash_gid = cash_group['group_id']
+                cash_gname = cash_group['name']
+                print(f"   ✅ Also sending to Cash Intraday!", flush=True)
+                if cash_gid not in matched_groups:
+                    add_to_buffer(cash_gid, cash_gname, str(raw_data), f"CASH+{institution_stock_found}")
+                    routed_to.append({'group_name': cash_gname})
+                    matched_groups.add(cash_gid)
+        else:
+            if institution_stock_found:
+                print(f"   🚫 Stock '{institution_stock_found}' found but no CASH+LONG - skipping Institution", flush=True)
         
         # 🔥 STEP 3: Check Reversal Groups (flexible word match - ALL words must be present anywhere)
         # BUT skip CASH_REVERSAL_LONG if cash_long_institution is True
