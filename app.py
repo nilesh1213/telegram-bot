@@ -352,7 +352,7 @@ def init_database():
 def send_to_telegram(group_id, text):
     """Send message to Telegram group"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {'chat_id': group_id, 'text': text}
+    payload = {'chat_id': int(group_id), 'text': text}
     
     try:
         response = requests.post(url, json=payload, timeout=10)
@@ -372,7 +372,7 @@ def create_invite_link(group_id, expire_days=30):
     """Create invite link for group"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/createChatInviteLink"
     expire_date = int(time.time()) + (expire_days * 86400)
-    payload = {'chat_id': group_id, 'expire_date': expire_date, 'member_limit': 1}
+    payload = {'chat_id': int(group_id), 'expire_date': expire_date, 'member_limit': 1}
     
     try:
         response = requests.post(url, json=payload, timeout=10)
@@ -391,7 +391,7 @@ def check_user_in_group(group_id, user_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChatMember"
     
     try:
-        response = requests.post(url, json={'chat_id': group_id, 'user_id': user_id}, timeout=10)
+        response = requests.post(url, json={'chat_id': int(group_id), 'user_id': int(user_id)}, timeout=10)
         data = response.json()
         
         if data.get('ok'):
@@ -406,12 +406,12 @@ def ban_user_from_group(group_id, user_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/banChatMember"
     
     try:
-        response = requests.post(url, json={'chat_id': group_id, 'user_id': user_id}, timeout=10)
+        response = requests.post(url, json={'chat_id': int(group_id), 'user_id': int(user_id)}, timeout=10)
         response.raise_for_status()
         
         # Unban so they can be re-invited later
         unban_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/unbanChatMember"
-        requests.post(unban_url, json={'chat_id': group_id, 'user_id': user_id, 'only_if_banned': True})
+        requests.post(unban_url, json={'chat_id': int(group_id), 'user_id': int(user_id), 'only_if_banned': True})
         
         return True
     except Exception as e:
@@ -447,7 +447,7 @@ def get_group_admins(group_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChatAdministrators"
     
     try:
-        response = requests.get(url, params={'chat_id': group_id}, timeout=10)
+        response = requests.get(url, params={'chat_id': int(group_id)}, timeout=10)
         result = response.json()
         
         admins = []
@@ -787,7 +787,11 @@ def webhook_router():
                     break  # Only need one stock match
         
         # 🔥 STEP 2: Check CASH + Institution Stock for dual-send
+        # CASH always goes to Cash Intraday when institution stock present
         has_cash = 'CASH' in message_upper
+        has_long = 'LONG' in message_upper
+        cash_long_institution = has_cash and has_long and institution_stock_found
+        
         if has_cash and institution_stock_found:
             cash_group = GROUPS.get('CASH')
             if cash_group and cash_group['enabled']:
@@ -802,9 +806,14 @@ def webhook_router():
                     matched_groups.add(group_id)
         
         # 🔥 STEP 3: Check Reversal Groups (flexible word match - ALL words must be present anywhere)
+        # BUT skip CASH_REVERSAL_LONG if cash_long_institution is True
         REVERSAL_GROUPS = ['CASH_REVERSAL_LONG', 'ZONE_REVERSAL_LONG', 'ZONE_REVERSAL_SHORT']
         
         for rev_key in REVERSAL_GROUPS:
+            # Skip CASH_REVERSAL_LONG when CASH+LONG+Institution stock present
+            if rev_key == 'CASH_REVERSAL_LONG' and cash_long_institution:
+                print(f"   🚫 Skipping CASH_REVERSAL_LONG - Institution stock present", flush=True)
+                continue
             rev_group = GROUPS.get(rev_key)
             if not rev_group or not rev_group['enabled']:
                 continue
@@ -1074,6 +1083,10 @@ def api_add_user():
     user_id = data.get('user_id')
     days = int(data.get('days', 30))
     
+    # Convert to int - Telegram API needs integer, not string
+    group_id = int(group_id)
+    user_id = int(user_id)
+    
     invite_link = create_invite_link(group_id, days)
     
     if not invite_link:
@@ -1099,6 +1112,9 @@ def api_extend_user():
         user_id = data.get('user_id')
         days = int(data.get('days', 30))
         
+        group_id = int(group_id)
+        user_id = int(user_id)
+        
         update_user_expiry(group_id, user_id, days)
         
         return jsonify({'success': True}), 200
@@ -1120,6 +1136,9 @@ def api_reduce_user():
         group_id = data.get('group_id')
         user_id = data.get('user_id')
         days = int(data.get('days', 1))
+        
+        group_id = int(group_id)
+        user_id = int(user_id)
         
         result = reduce_user_expiry(group_id, user_id, days)
         
@@ -1144,6 +1163,9 @@ def api_remove_user():
         
         group_id = data.get('group_id')
         user_id = data.get('user_id')
+        
+        group_id = int(group_id)
+        user_id = int(user_id)
         
         ban_user_from_group(group_id, user_id)
         remove_user(group_id, user_id)
