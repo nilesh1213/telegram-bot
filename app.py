@@ -236,6 +236,12 @@ GROUPS = {
         'enabled': True,
         'parent_group': 'ZONE'  # Also sends to Zone Signals
     },
+    'STOCK_OPTION_INTRADAY': {
+        'name': 'Stock Option Intraday',
+        'group_id': os.environ.get('STOCK_OPTION_INTRADAY_GROUP_ID', '-1003742044328'),
+        'keywords': ['STOCK', 'OPTION', 'INTRADAY'],
+        'enabled': True
+    },
     'INSTITUTION': {
         'name': 'Institution Buying Shares',
         'group_id': os.environ.get('INSTITUTION_GROUP_ID', '-1003517861259'),
