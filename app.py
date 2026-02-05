@@ -201,7 +201,7 @@ GROUPS = {
         'name': 'Cash Intraday 👉',
         'group_id': os.environ.get('CASH_GROUP_ID', '-1003603299587'),  # CORRECTED
         'keywords': ['CASH'],
-        'enabled': True
+        'enabled': False
     },
     'SWING': {
         'name': 'Swing and Investment Cash 👉',
@@ -246,7 +246,7 @@ GROUPS = {
         'name': 'Institution Buying Shares',
         'group_id': os.environ.get('INSTITUTION_GROUP_ID', '-1003517861259'),
         'keywords': [],  # Fetched dynamically from Google Sheets
-        'enabled': True,
+        'enabled': False,
         'is_priority': True  # Check this group first
     }
 }
