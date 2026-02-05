@@ -239,7 +239,7 @@ GROUPS = {
     'STOCK_OPTION_INTRADAY': {
         'name': 'Stock Option Intraday',
         'group_id': os.environ.get('STOCK_OPTION_INTRADAY_GROUP_ID', '-1003742044328'),
-        'keywords': ['STOCK'],
+        'keywords': ['MOMENTUM'],
         'enabled': True
     },
     'INSTITUTION': {
