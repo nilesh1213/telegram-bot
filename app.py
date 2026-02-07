@@ -4,9 +4,12 @@
     
     Features:
     ✅ 60-second MESSAGE BUFFER system
-    ✅ User management (add/extend/remove)
+    ✅ User management (add/extend/reduce/remove)
+    ✅ AUTOMATIC USER REMOVAL (hourly check - database only, no Telegram ban)
+    ✅ MANUAL USER REMOVAL (dashboard button - bans from Telegram + database)
     ✅ Multi-database support (SQLite for local, PostgreSQL for production)
     ✅ Real-time dashboard
+    ✅ Weekly message cleanup (7 days)
     
     For LOCAL testing:
     - Uses SQLite database (no setup needed)
@@ -348,6 +351,63 @@ cleanup_thread.start()
 print("✅ Weekly message cleanup thread started")
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 🗑️ AUTOMATIC USER REMOVAL (checks every hour, removes expired users)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def auto_remove_expired_users():
+    """Background thread - removes expired users from DATABASE only (does NOT ban from Telegram)"""
+    while True:
+        time.sleep(3600)  # Check every hour
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # Find expired users
+            if DATABASE_TYPE == 'sqlite':
+                cursor.execute("""
+                    SELECT user_id, group_id, name 
+                    FROM users 
+                    WHERE datetime(expiry_date) < datetime('now')
+                """)
+            elif DATABASE_TYPE == 'postgresql':
+                cursor.execute("""
+                    SELECT user_id, group_id, name 
+                    FROM users 
+                    WHERE expiry_date < NOW()
+                """)
+            
+            expired_users = cursor.fetchall()
+            conn.close()
+            
+            if expired_users:
+                print(f"\n🗑️ Found {len(expired_users)} expired users - removing...", flush=True)
+                
+                for user_id, group_id, name in expired_users:
+                    print(f"   Removing {name} (ID: {user_id}) from database", flush=True)
+                    
+                    # Just delete from database (no Telegram ban)
+                    remove_user(group_id, user_id)
+                    
+                    # Notify user (optional)
+                    try:
+                        send_to_telegram(user_id, "⏰ Your subscription has expired. Please contact admin to renew.")
+                    except:
+                        pass
+                    
+                    time.sleep(2)  # Delay between removals
+                
+                print(f"✅ Removed {len(expired_users)} expired users from database", flush=True)
+            else:
+                print("✅ No expired users to remove", flush=True)
+                
+        except Exception as e:
+            print(f"❌ Auto-removal error: {e}", flush=True)
+
+auto_remove_thread = threading.Thread(target=auto_remove_expired_users, daemon=True)
+auto_remove_thread.start()
+print("✅ Automatic user removal thread started (checks hourly)")
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 💾 DATABASE CONNECTION
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -561,9 +621,13 @@ def get_group_admins(group_id):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def add_user(group_id, user_id, days):
-    """Add user to group"""
+    """Add user to group - ALWAYS store as strings for consistency"""
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # Convert to strings for consistent storage
+    group_id = str(group_id)
+    user_id = str(user_id)
     
     name = get_user_info(user_id)
     invited_date = datetime.now()
@@ -591,11 +655,15 @@ def add_user(group_id, user_id, days):
     
     conn.commit()
     conn.close()
+    print(f"✅ User {user_id} added to database for group {group_id}", flush=True)
 
 def get_users_by_group(group_id):
-    """Get all users for a specific group"""
+    """Get all users for a specific group - use string for consistency"""
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # Convert to string for consistent querying
+    group_id = str(group_id)
     
     placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
     cursor.execute(f'''
@@ -607,12 +675,17 @@ def get_users_by_group(group_id):
     
     users = cursor.fetchall()
     conn.close()
+    print(f"📊 Retrieved {len(users)} users for group {group_id}", flush=True)
     return users
 
 def update_user_expiry(group_id, user_id, additional_days):
-    """Extend user expiry"""
+    """Extend user expiry - use strings for consistency"""
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # Convert to strings
+    group_id = str(group_id)
+    user_id = str(user_id)
     
     placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
     cursor.execute(f'''
@@ -658,6 +731,10 @@ def reduce_user_expiry(group_id, user_id, reduce_days):
     """Reduce user expiry (but not below current date) - Returns error if would go negative"""
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # Convert to strings
+    group_id = str(group_id)
+    user_id = str(user_id)
     
     placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
     cursor.execute(f'''
@@ -716,15 +793,20 @@ def reduce_user_expiry(group_id, user_id, reduce_days):
     return {'error': 'User not found'}
 
 def remove_user(group_id, user_id):
-    """Remove user from database"""
+    """Remove user from database - use strings for consistency"""
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # Convert to strings
+    group_id = str(group_id)
+    user_id = str(user_id)
     
     placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
     cursor.execute(f'DELETE FROM users WHERE group_id = {placeholder} AND user_id = {placeholder}', (group_id, user_id))
     
     conn.commit()
     conn.close()
+    print(f"🗑️ User {user_id} removed from database for group {group_id}", flush=True)
 
 def log_message(message, group_id, group_name, matched_keywords):
     """Log message sent to group"""
@@ -1111,9 +1193,7 @@ def api_group_users(group_id):
                 time_diff = expiry_date - current_time
                 days_left_calculated = max(0, time_diff.days)
                 
-                # Skip expired users from display
-                if days_left_calculated <= 0:
-                    continue  # Don't show expired users
+                print(f"   User {user_id}: days_left={days_left_calculated}, expiry={expiry_date}, joined={joined}", flush=True)
                 
                 result.append({
                     'user_id': user_id,
@@ -1251,7 +1331,7 @@ def api_reduce_user():
 
 @app.route('/api/user/remove', methods=['POST'])
 def api_remove_user():
-    """Remove user from group"""
+    """Remove user from group (MANUAL: bans from Telegram + removes from database)"""
     try:
         data = request.json
         
@@ -1264,6 +1344,7 @@ def api_remove_user():
         group_id = int(group_id)
         user_id = int(user_id)
         
+        # Manual removal: Ban from Telegram AND remove from database
         ban_user_from_group(group_id, user_id)
         remove_user(group_id, user_id)
         
@@ -1367,6 +1448,7 @@ if __name__ == '__main__':
     print(f"✅ Admin ID: {ADMIN_USER_ID}")
     print(f"✅ Database: {DATABASE_TYPE}")
     print(f"✅ Buffer System: ACTIVE (60-second batching)")
+    print(f"✅ Auto-Removal: ACTIVE (checks every hour for expired users)")
     
     print("\n📋 CONFIGURED GROUPS:")
     for key, config in GROUPS.items():
@@ -1379,6 +1461,7 @@ if __name__ == '__main__':
     print("📡 Webhook: /webhook/router")
     print("🏠 Dashboard: http://localhost:5000")
     print("⏳ Messages buffered for 60 seconds before sending")
+    print("🗑️ Expired users automatically removed every hour")
     print("═" * 70)
     print()
     
