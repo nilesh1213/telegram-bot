@@ -5,8 +5,7 @@
     Features:
     ✅ 60-second MESSAGE BUFFER system
     ✅ User management (add/extend/reduce/remove)
-    ✅ AUTOMATIC USER REMOVAL (hourly check - database only, no Telegram ban)
-    ✅ MANUAL USER REMOVAL (dashboard button - bans from Telegram + database)
+    ✅ AUTOMATIC USER REMOVAL (kicks from Telegram + removes from database)
     ✅ Multi-database support (SQLite for local, PostgreSQL for production)
     ✅ Real-time dashboard
     ✅ Weekly message cleanup (7 days)
@@ -25,9 +24,38 @@ import time
 import os
 import threading
 from collections import defaultdict
+import logging
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔇 SUPPRESS ROUTINE HTTP REQUEST LOGS (only show webhook and user actions)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Disable Flask's default request logging
+import logging
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)  # Only errors, not INFO requests
+
+# Override Flask's request logger
+class SuppressRoutineLogs(logging.Filter):
+    def filter(self, record):
+        # Suppress routine GET requests for stats, buffer, messages, group users
+        if any(x in record.getMessage() for x in ['/api/stats', '/api/buffer', '/api/messages', '/api/group/', 'GET /']):
+            return False
+        return True
+
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.addFilter(SuppressRoutineLogs())
+
+# Custom request logger for important actions only
+@app.after_request
+def log_important_requests(response):
+    """Only log webhook and user management endpoints"""
+    if '/webhook/' in request.path or '/api/user/' in request.path:
+        print(f"📍 {request.method} {request.path} → {response.status_code}", flush=True)
+    return response
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔧 CONFIGURATION
@@ -281,7 +309,6 @@ def process_buffer():
     while True:
         try:
             time.sleep(60)  # Wait 60 seconds
-            print("⏰ Buffer cycle - checking for messages...")
             
             # Take snapshot of buffer and clear it
             buffer_snapshot = {}
@@ -292,9 +319,10 @@ def process_buffer():
                             buffer_snapshot[gid] = msgs.copy()
                     message_buffer.clear()
             
-            # Send buffered messages
+            # Send buffered messages (only log if there are messages)
             if buffer_snapshot:
-                print(f"📤 Sending {len(buffer_snapshot)} group(s)")
+                print("\n" + "="*70, flush=True)
+                print(f"📤 BUFFER SEND: {len(buffer_snapshot)} group(s)", flush=True)
                 
                 for idx, (gid, msgs) in enumerate(buffer_snapshot.items()):
                     # Combine all messages for this group
@@ -304,18 +332,17 @@ def process_buffer():
                         # Log the combined message
                         log_message(combined, gid, msgs[0]['group_name'], 
                                   ", ".join(set([m['keyword'] for m in msgs])))
-                        print(f"✅ Sent to {msgs[0]['group_name']} ({len(msgs)} messages)")
+                        print(f"✅ Sent to {msgs[0]['group_name']} ({len(msgs)} messages)", flush=True)
                     
                     # Delay between groups to avoid rate limits
                     if idx < len(buffer_snapshot) - 1:
                         time.sleep(5)  # 5 seconds between groups
                 
                 last_batch_time = datetime.now()
-            else:
-                print("📭 No messages in buffer")
+                print("="*70 + "\n", flush=True)
                 
         except Exception as e:
-            print(f"❌ Buffer error: {e}")
+            print(f"❌ Buffer error: {e}", flush=True)
 
 # Start buffer thread
 buffer_thread = threading.Thread(target=process_buffer, daemon=True)
@@ -355,7 +382,7 @@ print("✅ Weekly message cleanup thread started")
 # ═══════════════════════════════════════════════════════════════════════════
 
 def auto_remove_expired_users():
-    """Background thread - removes expired users from DATABASE only (does NOT ban from Telegram)"""
+    """Background thread - removes expired users from TELEGRAM GROUP + DATABASE"""
     while True:
         time.sleep(60)  # Check every 60 seconds for testing
         try:
@@ -406,13 +433,20 @@ def auto_remove_expired_users():
                     try:
                         print(f"   Removing {name} (ID: {user_id}) from group {group_id}, expired: {expiry_date}", flush=True)
                         
-                        # Just delete from database (no Telegram ban)
+                        # Ban from Telegram group (kick them out)
+                        ban_result = ban_user_from_group(group_id, user_id)
+                        if ban_result:
+                            print(f"   ✅ Banned from Telegram group", flush=True)
+                        else:
+                            print(f"   ⚠️ Could not ban from Telegram (maybe already left)", flush=True)
+                        
+                        # Delete from database
                         remove_user(group_id, user_id)
                         removed_count += 1
                         
-                        # Notify user (optional)
+                        # Notify user
                         try:
-                            send_to_telegram(user_id, "⏰ Your subscription has expired. Please contact admin to renew.")
+                            send_to_telegram(user_id, "⏰ Your subscription has expired. You have been removed from the group. Please contact admin to renew.")
                         except Exception as notify_error:
                             print(f"   ⚠️ Could not notify user {user_id}: {notify_error}", flush=True)
                         
@@ -420,7 +454,7 @@ def auto_remove_expired_users():
                     except Exception as user_error:
                         print(f"   ❌ Failed to remove user {user_id}: {user_error}", flush=True)
                 
-                print(f"✅ Successfully removed {removed_count}/{len(expired_users)} expired users from database", flush=True)
+                print(f"✅ Successfully removed {removed_count}/{len(expired_users)} expired users from Telegram & database", flush=True)
             else:
                 print("✅ No expired users to remove", flush=True)
             
@@ -950,20 +984,12 @@ def webhook_router():
             print("❌ ERROR: No data received!", flush=True)
             return jsonify({'error': 'No data received'}), 400
         
-        print("\n" + "═" * 70, flush=True)
-        print("🔔 ALERT RECEIVED - ADDING TO BUFFER", flush=True)
-        print("═" * 70, flush=True)
-        print(f"Content-Type: {content_type}", flush=True)
-        print(f"Raw Request Data: {request.data[:200]}", flush=True)
-        print(f"Processed Message: {raw_data}", flush=True)
-        print("─" * 70, flush=True)
+        print(f"\n📥 ALERT: {str(raw_data)[:100]}...", flush=True)
         
         # Route to appropriate groups based on keywords
         message_upper = str(raw_data).upper()
         routed_to = []
         matched_groups = set()  # Track which groups already matched to avoid duplicates
-        
-        print(f"🔍 Searching for keywords in: {message_upper[:100]}", flush=True)
         
         # 🔥 STEP 1: Find Institution stock keyword (DON'T send yet - wait for CASH+LONG check)
         institution_group = GROUPS.get('INSTITUTION')
@@ -1221,7 +1247,11 @@ def api_group_users(group_id):
                 time_diff = expiry_date - current_time
                 days_left_calculated = max(0, time_diff.days)
                 
-                print(f"   User {user_id}: days_left={days_left_calculated}, expiry={expiry_date}, joined={joined}", flush=True)
+                # Enhanced logging for users with < 1 day remaining
+                if days_left_calculated < 1 and time_diff.total_seconds() > 0:
+                    hours_left = int(time_diff.total_seconds() / 3600)
+                    minutes_left = int((time_diff.total_seconds() % 3600) / 60)
+                    print(f"   ⏰ User {user_id} ({name}): {hours_left}h {minutes_left}m until expiry | Added: {invited_str} | Expires: {expiry_str}", flush=True)
                 
                 result.append({
                     'user_id': user_id,
