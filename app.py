@@ -357,7 +357,7 @@ print("✅ Weekly message cleanup thread started")
 def auto_remove_expired_users():
     """Background thread - removes expired users from DATABASE only (does NOT ban from Telegram)"""
     while True:
-        time.sleep(60)  # Check every hour
+        time.sleep(3600)  # Check every hour
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -370,10 +370,11 @@ def auto_remove_expired_users():
                     WHERE datetime(expiry_date) < datetime('now')
                 """)
             elif DATABASE_TYPE == 'postgresql':
+                # Cast VARCHAR to TIMESTAMP for comparison
                 cursor.execute("""
                     SELECT user_id, group_id, name 
                     FROM users 
-                    WHERE expiry_date < NOW()
+                    WHERE CAST(expiry_date AS TIMESTAMP) < NOW()
                 """)
             
             expired_users = cursor.fetchall()
