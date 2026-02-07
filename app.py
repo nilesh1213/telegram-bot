@@ -357,7 +357,7 @@ print("✅ Weekly message cleanup thread started")
 def auto_remove_expired_users():
     """Background thread - removes expired users from DATABASE only (does NOT ban from Telegram)"""
     while True:
-        time.sleep(3600)  # Check every hour
+        time.sleep(60)  # Check every hour
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
