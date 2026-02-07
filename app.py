@@ -357,52 +357,79 @@ print("✅ Weekly message cleanup thread started")
 def auto_remove_expired_users():
     """Background thread - removes expired users from DATABASE only (does NOT ban from Telegram)"""
     while True:
-        time.sleep(3600)  # Check every hour
+        time.sleep(60)  # Check every 60 seconds for testing
         try:
+            print("\n" + "="*70, flush=True)
+            print("🔍 AUTO-REMOVAL CHECK STARTING...", flush=True)
+            print("="*70, flush=True)
+            
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            # Find expired users
+            # Find expired users with better error handling
             if DATABASE_TYPE == 'sqlite':
                 cursor.execute("""
-                    SELECT user_id, group_id, name 
+                    SELECT user_id, group_id, name, expiry_date
                     FROM users 
                     WHERE datetime(expiry_date) < datetime('now')
                 """)
             elif DATABASE_TYPE == 'postgresql':
-                # Cast VARCHAR to TIMESTAMP for comparison
+                # More robust: handle both TIMESTAMP and VARCHAR columns
                 cursor.execute("""
-                    SELECT user_id, group_id, name 
+                    SELECT user_id, group_id, name, expiry_date
                     FROM users 
-                    WHERE CAST(expiry_date AS TIMESTAMP) < NOW()
+                    WHERE 
+                        CASE 
+                            WHEN expiry_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' 
+                            THEN TO_TIMESTAMP(expiry_date, 'YYYY-MM-DD HH24:MI:SS') 
+                            ELSE expiry_date::TIMESTAMP 
+                        END < NOW()
                 """)
             
             expired_users = cursor.fetchall()
+            
+            print(f"📊 Database query completed. Found {len(expired_users)} expired users.", flush=True)
+            
+            # Show first few for debugging
+            if expired_users:
+                print("🔍 Sample expired users:", flush=True)
+                for i, user in enumerate(expired_users[:3]):
+                    print(f"   User {i+1}: ID={user[0]}, Group={user[1]}, Name={user[2]}, Expiry={user[3]}", flush=True)
+            
             conn.close()
             
             if expired_users:
                 print(f"\n🗑️ Found {len(expired_users)} expired users - removing...", flush=True)
                 
-                for user_id, group_id, name in expired_users:
-                    print(f"   Removing {name} (ID: {user_id}) from database", flush=True)
-                    
-                    # Just delete from database (no Telegram ban)
-                    remove_user(group_id, user_id)
-                    
-                    # Notify user (optional)
+                removed_count = 0
+                for user_id, group_id, name, expiry_date in expired_users:
                     try:
-                        send_to_telegram(user_id, "⏰ Your subscription has expired. Please contact admin to renew.")
-                    except:
-                        pass
-                    
-                    time.sleep(2)  # Delay between removals
+                        print(f"   Removing {name} (ID: {user_id}) from group {group_id}, expired: {expiry_date}", flush=True)
+                        
+                        # Just delete from database (no Telegram ban)
+                        remove_user(group_id, user_id)
+                        removed_count += 1
+                        
+                        # Notify user (optional)
+                        try:
+                            send_to_telegram(user_id, "⏰ Your subscription has expired. Please contact admin to renew.")
+                        except Exception as notify_error:
+                            print(f"   ⚠️ Could not notify user {user_id}: {notify_error}", flush=True)
+                        
+                        time.sleep(1)  # Delay between removals
+                    except Exception as user_error:
+                        print(f"   ❌ Failed to remove user {user_id}: {user_error}", flush=True)
                 
-                print(f"✅ Removed {len(expired_users)} expired users from database", flush=True)
+                print(f"✅ Successfully removed {removed_count}/{len(expired_users)} expired users from database", flush=True)
             else:
                 print("✅ No expired users to remove", flush=True)
+            
+            print("="*70 + "\n", flush=True)
                 
         except Exception as e:
             print(f"❌ Auto-removal error: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
 
 auto_remove_thread = threading.Thread(target=auto_remove_expired_users, daemon=True)
 auto_remove_thread.start()
