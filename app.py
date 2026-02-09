@@ -556,23 +556,91 @@ def init_database():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def send_to_telegram(group_id, text):
-    """Send message to Telegram group"""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {'chat_id': int(group_id), 'text': text}
+    """Send message to Telegram group with smart splitting for long messages"""
+    MAX_CHUNK_SIZE = 2500  # Target size (well below Telegram's 4096 limit)
+    BUFFER_SIZE = 200      # Buffer to avoid breaking messages
     
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        response.raise_for_status()
-        return True
-    except Exception as e:
-        print(f"❌ Failed to send to {group_id}: {e}")
-        # Show detailed error response from Telegram
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    
+    # If message is short enough, send directly
+    if len(text) <= MAX_CHUNK_SIZE:
+        payload = {'chat_id': int(group_id), 'text': text}
         try:
-            error_details = response.json()
-            print(f"   Telegram API Response: {error_details}")
-        except:
-            pass
-        return False
+            response = requests.post(url, json=payload, timeout=10)
+            response.raise_for_status()
+            return True
+        except Exception as e:
+            print(f"❌ Failed to send to {group_id}: {e}")
+            try:
+                error_details = response.json()
+                print(f"   Telegram API Response: {error_details}")
+            except:
+                pass
+            return False
+    
+    # Message is too long - need to split intelligently
+    print(f"📏 Message is {len(text)} chars - splitting into chunks...")
+    
+    # Split by message separator (3 newlines between messages)
+    individual_messages = text.split("\n\n\n")
+    
+    chunks = []
+    current_chunk = []
+    current_length = 0
+    
+    for msg in individual_messages:
+        msg_length = len(msg)
+        
+        # If adding this message would exceed limit (with buffer)
+        if current_length + msg_length + 3 > MAX_CHUNK_SIZE - BUFFER_SIZE:
+            # Save current chunk if it has content
+            if current_chunk:
+                chunks.append("\n\n\n".join(current_chunk))
+                current_chunk = []
+                current_length = 0
+            
+            # If single message is too long, we still need to send it
+            # (Telegram limit is 4096, so 2500+ single messages will still go through)
+            if msg_length > MAX_CHUNK_SIZE:
+                chunks.append(msg)
+            else:
+                current_chunk = [msg]
+                current_length = msg_length
+        else:
+            # Add message to current chunk
+            current_chunk.append(msg)
+            current_length += msg_length + 3  # +3 for separator
+    
+    # Don't forget the last chunk
+    if current_chunk:
+        chunks.append("\n\n\n".join(current_chunk))
+    
+    print(f"✂️ Split into {len(chunks)} chunks:")
+    for i, chunk in enumerate(chunks):
+        print(f"   Chunk {i+1}: {len(chunk)} characters")
+    
+    # Send all chunks with small delay between them
+    all_sent = True
+    for i, chunk in enumerate(chunks):
+        payload = {'chat_id': int(group_id), 'text': chunk}
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            response.raise_for_status()
+            print(f"✅ Sent chunk {i+1}/{len(chunks)}")
+            
+            # Small delay between chunks (except for last one)
+            if i < len(chunks) - 1:
+                time.sleep(1)
+        except Exception as e:
+            print(f"❌ Failed to send chunk {i+1}/{len(chunks)} to {group_id}: {e}")
+            try:
+                error_details = response.json()
+                print(f"   Telegram API Response: {error_details}")
+            except:
+                pass
+            all_sent = False
+    
+    return all_sent
 
 def create_invite_link(group_id, expire_days=30):
     """Create invite link for group"""
