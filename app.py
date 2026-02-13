@@ -283,6 +283,80 @@ GROUPS = {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# ⏱️ RATE LIMITING SYSTEM (5-minute windows, max 8 messages)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Rate limiter configuration - ONLY for STOCK_OPTION_INTRADAY group
+RATE_LIMIT_CONFIG = {
+    'STOCK_OPTION_INTRADAY': {  # Group key
+        'enabled': True,
+        'max_messages_per_window': 8,  # Max 8 messages per 5-min window
+        'window_minutes': 5,
+        'keyword': 'MOMENTUM'  # Track messages with this keyword
+    }
+}
+
+# Track messages per 5-minute window for each group
+# Structure: {group_key: {'window_start': timestamp, 'count': int, 'messages': []}}
+rate_limit_tracker = defaultdict(lambda: {'window_start': None, 'count': 0, 'messages': []})
+
+def get_current_5min_window():
+    """Get current 5-minute window start time (e.g., 9:15, 9:20, 9:25...)"""
+    now = datetime.now()
+    # Round down to nearest 5-minute mark
+    minute = (now.minute // 5) * 5
+    window_start = now.replace(minute=minute, second=0, microsecond=0)
+    return window_start
+
+def check_rate_limit(group_key, message_text):
+    """
+    Check if message should be rate-limited for this group.
+    Returns: (should_send: bool, reason: str)
+    """
+    # Check if rate limiting is enabled for this group
+    if group_key not in RATE_LIMIT_CONFIG or not RATE_LIMIT_CONFIG[group_key]['enabled']:
+        return True, None  # No rate limiting, allow all
+    
+    config = RATE_LIMIT_CONFIG[group_key]
+    keyword = config['keyword']
+    max_messages = config['max_messages_per_window']
+    
+    # Check if message contains the keyword
+    if keyword.upper() not in message_text.upper():
+        return True, None  # Keyword not found, don't count this message
+    
+    # Get current 5-minute window
+    current_window = get_current_5min_window()
+    tracker = rate_limit_tracker[group_key]
+    
+    # Check if we're in a new window
+    if tracker['window_start'] is None or tracker['window_start'] != current_window:
+        # New window - reset counter
+        tracker['window_start'] = current_window
+        tracker['count'] = 0
+        tracker['messages'] = []
+        print(f"⏱️ [{group_key}] New 5-min window started: {current_window.strftime('%H:%M')}", flush=True)
+    
+    # Check if limit reached
+    if tracker['count'] >= max_messages:
+        window_end = current_window + timedelta(minutes=config['window_minutes'])
+        reason = f"Rate limit reached: {tracker['count']}/{max_messages} messages in window {current_window.strftime('%H:%M')}-{window_end.strftime('%H:%M')}"
+        print(f"🚫 [{group_key}] {reason}", flush=True)
+        return False, reason
+    
+    # Allow message and increment counter
+    tracker['count'] += 1
+    tracker['messages'].append({
+        'time': datetime.now(),
+        'text': message_text[:50]  # Store first 50 chars for debugging
+    })
+    
+    window_end = current_window + timedelta(minutes=config['window_minutes'])
+    print(f"✅ [{group_key}] Message {tracker['count']}/{max_messages} in window {current_window.strftime('%H:%M')}-{window_end.strftime('%H:%M')}", flush=True)
+    
+    return True, None
+
+# ═══════════════════════════════════════════════════════════════════════════
 # ⏳ BUFFER SYSTEM
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1162,6 +1236,13 @@ def webhook_router():
                     
                     print(f"   ✅ MATCH! Keyword '{keyword}' found!", flush=True)
                     
+                    # ⏱️ CHECK RATE LIMIT before adding to buffer
+                    should_send, rate_limit_reason = check_rate_limit(group_key, str(raw_data))
+                    
+                    if not should_send:
+                        print(f"   🚫 RATE LIMITED: {rate_limit_reason}", flush=True)
+                        continue  # Skip this group, move to next
+                    
                     # Avoid duplicate sends
                     if group_id not in matched_groups:
                         add_to_buffer(group_id, group_name, str(raw_data), keyword)
@@ -1275,6 +1356,61 @@ def api_groups():
         })
     
     return jsonify({'groups': groups_list}), 200
+
+@app.route('/api/rate-limit/status', methods=['GET'])
+def api_rate_limit_status():
+    """Get current rate limit status for all rate-limited groups"""
+    status = []
+    
+    for group_key, config in RATE_LIMIT_CONFIG.items():
+        if not config['enabled']:
+            continue
+        
+        tracker = rate_limit_tracker[group_key]
+        current_window = get_current_5min_window()
+        
+        # Get group name from GROUPS config
+        group_name = GROUPS.get(group_key, {}).get('name', group_key)
+        
+        if tracker['window_start'] is None or tracker['window_start'] != current_window:
+            # New window or no messages yet
+            window_end = current_window + timedelta(minutes=config['window_minutes'])
+            status.append({
+                'group_key': group_key,
+                'group_name': group_name,
+                'keyword': config['keyword'],
+                'current_window': f"{current_window.strftime('%H:%M')}-{window_end.strftime('%H:%M')}",
+                'messages_sent': 0,
+                'max_messages': config['max_messages_per_window'],
+                'remaining': config['max_messages_per_window'],
+                'is_limited': False
+            })
+        else:
+            # Active window
+            window_end = tracker['window_start'] + timedelta(minutes=config['window_minutes'])
+            remaining = max(0, config['max_messages_per_window'] - tracker['count'])
+            
+            status.append({
+                'group_key': group_key,
+                'group_name': group_name,
+                'keyword': config['keyword'],
+                'current_window': f"{tracker['window_start'].strftime('%H:%M')}-{window_end.strftime('%H:%M')}",
+                'messages_sent': tracker['count'],
+                'max_messages': config['max_messages_per_window'],
+                'remaining': remaining,
+                'is_limited': tracker['count'] >= config['max_messages_per_window'],
+                'recent_messages': [
+                    {
+                        'time': msg['time'].strftime('%H:%M:%S'),
+                        'text': msg['text']
+                    } for msg in tracker['messages'][-5:]  # Last 5 messages
+                ]
+            })
+    
+    return jsonify({
+        'rate_limits': status,
+        'current_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }), 200
 
 @app.route('/api/group/<group_id>/users', methods=['GET'])
 def api_group_users(group_id):
@@ -1579,7 +1715,11 @@ if __name__ == '__main__':
     print("\n📋 CONFIGURED GROUPS:")
     for key, config in GROUPS.items():
         status = "✅ ACTIVE" if config['enabled'] else "⏸️  DISABLED"
-        print(f"   {status} {config['name']}")
+        rate_limit_info = ""
+        if key in RATE_LIMIT_CONFIG and RATE_LIMIT_CONFIG[key]['enabled']:
+            rl_cfg = RATE_LIMIT_CONFIG[key]
+            rate_limit_info = f" [⏱️ RATE LIMITED: {rl_cfg['max_messages_per_window']}/{rl_cfg['window_minutes']}min]"
+        print(f"   {status} {config['name']}{rate_limit_info}")
         print(f"      Group ID: {config['group_id']}")
         print(f"      Keywords: {', '.join(config['keywords'])}")
     
