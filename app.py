@@ -422,6 +422,41 @@ buffer_thread.start()
 print("✅ Buffer thread started")
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 🔄 MOMENTUM AUTO-RESET (every 23 hours after window closes)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def auto_reset_momentum():
+    """
+    Waits until the 30-min window has CLOSED, then waits 23 hours and resets.
+    Cycle: window closes → wait 23 hrs → reset → ready for next day's first message.
+    """
+    print("🔄 Momentum auto-reset thread started (resets every 23h after window closes)", flush=True)
+    while True:
+        try:
+            tracker = rate_limit_tracker['STOCK_OPTION_INTRADAY']
+            window_start = tracker.get('window_start')
+
+            if window_start is not None:
+                # Calculate when the 30-min window closed
+                window_closed_at = window_start + timedelta(minutes=30)
+                reset_at = window_closed_at + timedelta(hours=23)
+                now = datetime.now()
+
+                if now >= reset_at:
+                    # Time to reset
+                    rate_limit_tracker['STOCK_OPTION_INTRADAY']['window_start'] = None
+                    print(f"🔄 [MOMENTUM] Auto-reset triggered at {now.strftime('%H:%M:%S')} (23h after window closed at {window_closed_at.strftime('%H:%M:%S')})", flush=True)
+
+            time.sleep(60)  # Check every minute
+        except Exception as e:
+            print(f"❌ Momentum auto-reset error: {e}", flush=True)
+            time.sleep(60)
+
+momentum_reset_thread = threading.Thread(target=auto_reset_momentum, daemon=True)
+momentum_reset_thread.start()
+print("✅ Momentum auto-reset thread started (23h cycle)")
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 🗑️ WEEKLY MESSAGE CLEANUP (only messages table, nothing else)
 # ═══════════════════════════════════════════════════════════════════════════
 
