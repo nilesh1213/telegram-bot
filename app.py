@@ -234,6 +234,18 @@ GROUPS = {
         'keywords': ['CASH'],
         'enabled': False
     },
+    'CASH_ZONE': {
+        'name': 'Cash Zone',
+        'group_id': os.environ.get('CASH_ZONE_GROUP_ID', '-1003563290768'),
+        'keywords': ['NAITIK'],
+        'enabled': True
+    },
+    'FUTURE_ZONE': {
+        'name': 'Future Zones',
+        'group_id': os.environ.get('FUTURE_ZONE_GROUP_ID', '-1003809222078'),
+        'keywords': ['TANISH'],
+        'enabled': True
+    },
     'SWING': {
         'name': 'Swing and Investment Cash 👉',
         'group_id': os.environ.get('SWING_GROUP_ID', '-1003563158525'),  # CORRECTED
@@ -283,78 +295,64 @@ GROUPS = {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ⏱️ RATE LIMITING SYSTEM (5-minute windows, max 8 messages)
+# ⏱️ RATE LIMITING SYSTEM
+# MOMENTUM GROUP: 30-minute window from first message, then BLOCK all messages
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Rate limiter configuration - ONLY for STOCK_OPTION_INTRADAY group
 RATE_LIMIT_CONFIG = {
     'STOCK_OPTION_INTRADAY': {  # Group key
         'enabled': True,
-        'max_messages_per_window': 8,  # Max 8 messages per 5-min window
-        'window_minutes': 5,
-        'keyword': 'MOMENTUM'  # Track messages with this keyword
+        'window_minutes': 30,       # 30-minute window from first message
+        'keyword': 'MOMENTUM'       # Track messages with this keyword
     }
 }
 
-# Track messages per 5-minute window for each group
-# Structure: {group_key: {'window_start': timestamp, 'count': int, 'messages': []}}
-rate_limit_tracker = defaultdict(lambda: {'window_start': None, 'count': 0, 'messages': []})
-
-def get_current_5min_window():
-    """Get current 5-minute window start time (e.g., 9:15, 9:20, 9:25...)"""
-    now = datetime.now()
-    # Round down to nearest 5-minute mark
-    minute = (now.minute // 5) * 5
-    window_start = now.replace(minute=minute, second=0, microsecond=0)
-    return window_start
+# Track 30-minute window for MOMENTUM group
+# Structure: {group_key: {'window_start': timestamp or None}}
+rate_limit_tracker = defaultdict(lambda: {'window_start': None})
 
 def check_rate_limit(group_key, message_text):
     """
-    Check if message should be rate-limited for this group.
+    MOMENTUM 30-min rule:
+      - First message triggers a 30-minute window.
+      - All messages WITHIN 30 mins are allowed.
+      - After 30 mins, ALL messages are BLOCKED (window resets next day / manual reset).
     Returns: (should_send: bool, reason: str)
     """
-    # Check if rate limiting is enabled for this group
     if group_key not in RATE_LIMIT_CONFIG or not RATE_LIMIT_CONFIG[group_key]['enabled']:
         return True, None  # No rate limiting, allow all
-    
+
     config = RATE_LIMIT_CONFIG[group_key]
     keyword = config['keyword']
-    max_messages = config['max_messages_per_window']
-    
-    # Check if message contains the keyword
+
+    # Only apply rule to MOMENTUM keyword messages
     if keyword.upper() not in message_text.upper():
-        return True, None  # Keyword not found, don't count this message
-    
-    # Get current 5-minute window
-    current_window = get_current_5min_window()
+        return True, None
+
     tracker = rate_limit_tracker[group_key]
-    
-    # Check if we're in a new window
-    if tracker['window_start'] is None or tracker['window_start'] != current_window:
-        # New window - reset counter
-        tracker['window_start'] = current_window
-        tracker['count'] = 0
-        tracker['messages'] = []
-        print(f"⏱️ [{group_key}] New 5-min window started: {current_window.strftime('%H:%M')}", flush=True)
-    
-    # Check if limit reached
-    if tracker['count'] >= max_messages:
-        window_end = current_window + timedelta(minutes=config['window_minutes'])
-        reason = f"Rate limit reached: {tracker['count']}/{max_messages} messages in window {current_window.strftime('%H:%M')}-{window_end.strftime('%H:%M')}"
-        print(f"🚫 [{group_key}] {reason}", flush=True)
+    now = datetime.now()
+    window_minutes = config['window_minutes']
+
+    # No window started yet → this is the FIRST message, start the clock
+    if tracker['window_start'] is None:
+        tracker['window_start'] = now
+        window_end = now + timedelta(minutes=window_minutes)
+        print(f"⏱️ [MOMENTUM] 30-min window STARTED at {now.strftime('%H:%M:%S')} → closes at {window_end.strftime('%H:%M:%S')}", flush=True)
+        return True, None
+
+    # Window already started → check if still within 30 mins
+    elapsed = (now - tracker['window_start']).total_seconds() / 60
+    window_end = tracker['window_start'] + timedelta(minutes=window_minutes)
+
+    if elapsed <= window_minutes:
+        remaining = window_minutes - elapsed
+        print(f"✅ [MOMENTUM] Within window ({elapsed:.1f}m elapsed, {remaining:.1f}m remaining)", flush=True)
+        return True, None
+    else:
+        reason = f"30-min window CLOSED (started {tracker['window_start'].strftime('%H:%M')}, ended {window_end.strftime('%H:%M')}). No more MOMENTUM messages."
+        print(f"🚫 [MOMENTUM] {reason}", flush=True)
         return False, reason
-    
-    # Allow message and increment counter
-    tracker['count'] += 1
-    tracker['messages'].append({
-        'time': datetime.now(),
-        'text': message_text[:50]  # Store first 50 chars for debugging
-    })
-    
-    window_end = current_window + timedelta(minutes=config['window_minutes'])
-    print(f"✅ [{group_key}] Message {tracker['count']}/{max_messages} in window {current_window.strftime('%H:%M')}-{window_end.strftime('%H:%M')}", flush=True)
-    
-    return True, None
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ⏳ BUFFER SYSTEM
@@ -1626,6 +1624,51 @@ def api_config():
     }), 200
 
 
+@app.route('/api/momentum/reset', methods=['POST'])
+def api_reset_momentum_window():
+    """Manually reset the 30-minute Momentum window (admin only)"""
+    try:
+        data = request.json or {}
+        if str(data.get('admin_id')) != str(ADMIN_USER_ID):
+            return jsonify({'error': 'Unauthorized'}), 403
+
+        old_start = rate_limit_tracker['STOCK_OPTION_INTRADAY'].get('window_start')
+        rate_limit_tracker['STOCK_OPTION_INTRADAY']['window_start'] = None
+        print(f"🔄 [MOMENTUM] Window manually RESET by admin (was: {old_start})", flush=True)
+        return jsonify({'success': True, 'message': 'Momentum 30-min window reset. Next MOMENTUM message will start a new window.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/momentum/status', methods=['GET'])
+def api_momentum_status():
+    """Check current Momentum window status"""
+    tracker = rate_limit_tracker['STOCK_OPTION_INTRADAY']
+    window_start = tracker.get('window_start')
+
+    if window_start is None:
+        return jsonify({'status': 'READY', 'message': 'No active window. Next MOMENTUM message will start the 30-min clock.'}), 200
+
+    now = datetime.now()
+    elapsed = (now - window_start).total_seconds() / 60
+    window_end = window_start + timedelta(minutes=30)
+
+    if elapsed <= 30:
+        remaining = 30 - elapsed
+        return jsonify({
+            'status': 'ACTIVE',
+            'window_start': window_start.strftime('%H:%M:%S'),
+            'window_end': window_end.strftime('%H:%M:%S'),
+            'elapsed_minutes': round(elapsed, 1),
+            'remaining_minutes': round(remaining, 1)
+        }), 200
+    else:
+        return jsonify({
+            'status': 'CLOSED',
+            'message': f'Window closed at {window_end.strftime("%H:%M")}. No MOMENTUM messages allowed. Use /api/momentum/reset to reset.'
+        }), 200
+
+
 @app.route('/api/check-bot/<group_id>', methods=['GET'])
 def check_bot_permissions(group_id):
     """Diagnostic: Check bot permissions on a group"""
@@ -1718,7 +1761,7 @@ if __name__ == '__main__':
         rate_limit_info = ""
         if key in RATE_LIMIT_CONFIG and RATE_LIMIT_CONFIG[key]['enabled']:
             rl_cfg = RATE_LIMIT_CONFIG[key]
-            rate_limit_info = f" [⏱️ RATE LIMITED: {rl_cfg['max_messages_per_window']}/{rl_cfg['window_minutes']}min]"
+            rate_limit_info = f" [⏱️ 30-MIN WINDOW from first message]"
         print(f"   {status} {config['name']}{rate_limit_info}")
         print(f"      Group ID: {config['group_id']}")
         print(f"      Keywords: {', '.join(config['keywords'])}")
