@@ -507,7 +507,7 @@ def auto_remove_expired_users():
                     FROM users 
                     WHERE datetime(expiry_date) < datetime('now')
                 """)
-                       elif DATABASE_TYPE == 'postgresql':
+            elif DATABASE_TYPE == 'postgresql':
                 cursor.execute("""
                     SELECT user_id, group_id, name, expiry_date
                     FROM users
