@@ -507,17 +507,11 @@ def auto_remove_expired_users():
                     FROM users 
                     WHERE datetime(expiry_date) < datetime('now')
                 """)
-            elif DATABASE_TYPE == 'postgresql':
-                # More robust: handle both TIMESTAMP and VARCHAR columns
+                       elif DATABASE_TYPE == 'postgresql':
                 cursor.execute("""
                     SELECT user_id, group_id, name, expiry_date
-                    FROM users 
-                    WHERE 
-                        CASE 
-                            WHEN expiry_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' 
-                            THEN TO_TIMESTAMP(expiry_date, 'YYYY-MM-DD HH24:MI:SS') 
-                            ELSE expiry_date::TIMESTAMP 
-                        END < NOW()
+                    FROM users
+                    WHERE expiry_date < NOW()
                 """)
             
             expired_users = cursor.fetchall()
@@ -657,6 +651,8 @@ def init_database():
     conn.commit()
     conn.close()
     print("✅ Database initialized")
+
+init_database()
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 📱 TELEGRAM FUNCTIONS
@@ -1392,58 +1388,7 @@ def api_groups():
 
 @app.route('/api/rate-limit/status', methods=['GET'])
 def api_rate_limit_status():
-    """Get current rate limit status for all rate-limited groups"""
-    status = []
-    
-    for group_key, config in RATE_LIMIT_CONFIG.items():
-        if not config['enabled']:
-            continue
-        
-        tracker = rate_limit_tracker[group_key]
-        current_window = get_current_5min_window()
-        
-        # Get group name from GROUPS config
-        group_name = GROUPS.get(group_key, {}).get('name', group_key)
-        
-        if tracker['window_start'] is None or tracker['window_start'] != current_window:
-            # New window or no messages yet
-            window_end = current_window + timedelta(minutes=config['window_minutes'])
-            status.append({
-                'group_key': group_key,
-                'group_name': group_name,
-                'keyword': config['keyword'],
-                'current_window': f"{current_window.strftime('%H:%M')}-{window_end.strftime('%H:%M')}",
-                'messages_sent': 0,
-                'max_messages': config['max_messages_per_window'],
-                'remaining': config['max_messages_per_window'],
-                'is_limited': False
-            })
-        else:
-            # Active window
-            window_end = tracker['window_start'] + timedelta(minutes=config['window_minutes'])
-            remaining = max(0, config['max_messages_per_window'] - tracker['count'])
-            
-            status.append({
-                'group_key': group_key,
-                'group_name': group_name,
-                'keyword': config['keyword'],
-                'current_window': f"{tracker['window_start'].strftime('%H:%M')}-{window_end.strftime('%H:%M')}",
-                'messages_sent': tracker['count'],
-                'max_messages': config['max_messages_per_window'],
-                'remaining': remaining,
-                'is_limited': tracker['count'] >= config['max_messages_per_window'],
-                'recent_messages': [
-                    {
-                        'time': msg['time'].strftime('%H:%M:%S'),
-                        'text': msg['text']
-                    } for msg in tracker['messages'][-5:]  # Last 5 messages
-                ]
-            })
-    
-    return jsonify({
-        'rate_limits': status,
-        'current_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    }), 200
+    return api_momentum_status()
 
 @app.route('/api/group/<group_id>/users', methods=['GET'])
 def api_group_users(group_id):
