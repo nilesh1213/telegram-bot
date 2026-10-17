@@ -431,8 +431,8 @@ def process_buffer():
 
 # Start buffer thread
 buffer_thread = threading.Thread(target=process_buffer, daemon=True)
-buffer_thread.start()
-print("✅ Buffer thread started")
+# (started by start_background_threads())
+print("✅ Buffer thread ready (starts with the first request)")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔄 MOMENTUM AUTO-RESET (every 23 hours after window closes)
@@ -466,8 +466,8 @@ def auto_reset_momentum():
             time.sleep(60)
 
 momentum_reset_thread = threading.Thread(target=auto_reset_momentum, daemon=True)
-momentum_reset_thread.start()
-print("✅ Momentum auto-reset thread started (23h cycle)")
+# (started by start_background_threads())
+print("✅ Momentum auto-reset thread ready (23h cycle)")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🗑️ WEEKLY MESSAGE CLEANUP (only messages table, nothing else)
@@ -495,8 +495,8 @@ def cleanup_old_messages():
         time.sleep(3600)  # run again in an hour
 
 cleanup_thread = threading.Thread(target=cleanup_old_messages, daemon=True)
-cleanup_thread.start()
-print("✅ Message cleanup thread started (hourly, deletes messages older than 24h)")
+# (started by start_background_threads())
+print("✅ Message cleanup thread ready (hourly, deletes messages older than 24h)")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🗑️ AUTOMATIC USER REMOVAL (checks every hour, removes expired users)
@@ -581,8 +581,8 @@ def auto_remove_expired_users():
             traceback.print_exc()
 
 auto_remove_thread = threading.Thread(target=auto_remove_expired_users, daemon=True)
-auto_remove_thread.start()
-print("✅ Automatic user removal thread started (checks hourly)")
+# (started by start_background_threads())
+print("✅ Automatic user removal thread ready")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 💾 DATABASE CONNECTION
@@ -2069,13 +2069,47 @@ def debug_sheets():
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint"""
-    return jsonify({'status': 'healthy', 'database': DATABASE_TYPE}), 200
+    alive = sorted(t.name for t in threading.enumerate() if t.name in {n for n, _ in BACKGROUND_THREADS})
+    return jsonify({'status': 'healthy', 'database': DATABASE_TYPE, 'background_threads': alive}), 200
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🚀 STARTUP
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Register the member-tracking webhook with Telegram when we know our public address
+# ═══════════════════════════════════════════════════════════════════════════
+# 🧵 BACKGROUND THREADS - started inside the process that serves requests
+# (threads do not survive a fork, so with gunicorn --preload the ones started at import time would
+#  live in the master process while the buffer fills up in a worker that has no sender thread)
+# ═══════════════════════════════════════════════════════════════════════════
+
+BACKGROUND_THREADS = [
+    ('buffer', process_buffer),
+    ('momentum-reset', auto_reset_momentum),
+    ('cleanup', cleanup_old_messages),
+    ('auto-remove', auto_remove_expired_users),
+]
+_threads_started_pid = None
+_threads_lock = threading.Lock()
+
+def start_background_threads():
+    """Start the background threads once per process. Cheap to call on every request."""
+    global _threads_started_pid
+    pid = os.getpid()
+    if _threads_started_pid == pid:
+        return
+    with _threads_lock:
+        if _threads_started_pid == pid:
+            return
+        _threads_started_pid = pid
+        for name, target in BACKGROUND_THREADS:
+            threading.Thread(target=target, daemon=True, name=name).start()
+        print(f"✅ Background threads started in process {pid}: {', '.join(n for n, _ in BACKGROUND_THREADS)}", flush=True)
+
+@app.before_request
+def _ensure_background_threads():
+    start_background_threads()
+
 if PUBLIC_URL:
     _hook_ok, _hook_detail = set_telegram_webhook(PUBLIC_URL)
     print(f"{'✅' if _hook_ok else '⚠️'} Telegram member-tracking webhook: {_hook_detail}", flush=True)
@@ -2114,5 +2148,6 @@ if __name__ == '__main__':
     print("═" * 70)
     print()
     
+    start_background_threads()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
