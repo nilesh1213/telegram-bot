@@ -74,6 +74,15 @@
         th { background: #f8f9fa; font-weight: 600; }
         
         .status-sent { color: #28a745; font-weight: bold; }
+        .api-error { display: none; background: #fdecea; border: 1px solid #f5c2c7; color: #842029; padding: 14px 18px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; }
+        .api-error div { margin-top: 6px; word-break: break-word; }
+        .api-error .api-hint { color: #6c4a4d; font-size: 13px; }
+        .status-failed { color: #dc3545; font-weight: bold; }
+        .fail-reason { font-size: 12px; color: #dc3545; margin-top: 4px; white-space: normal; word-break: break-word; }
+        .warn-reason { font-size: 12px; color: #b26a00; margin-top: 4px; white-space: normal; }
+        .no-plan { font-size: 11px; color: #999; }
+        .member-info { font-size: 13px; color: #666; margin-bottom: 12px; }
+        .stat-card.failed .number { color: #dc3545; }
         .status-buffered { color: #ffc107; font-weight: bold; }
         .status-joined { color: #28a745; font-weight: bold; }
         .status-pending { color: #ffc107; font-weight: bold; }
@@ -94,6 +103,8 @@
             <h1>📱 Telegram Unified System - Buffer Dashboard</h1>
             <p>Real-time message buffering (60s) + User Management</p>
         </header>
+
+        <div id="apiError" class="api-error"></div>
         
         <div class="stats">
             <div class="stat-card">
@@ -109,8 +120,12 @@
                 <div class="number" id="statBuffered">-</div>
             </div>
             <div class="stat-card">
-                <h3>✅ Sent Messages</h3>
+                <h3>✅ Sent (last 24h)</h3>
                 <div class="number" id="statMessages">-</div>
+            </div>
+            <div class="stat-card failed">
+                <h3>❌ Failed (last 24h)</h3>
+                <div class="number" id="statFailed">-</div>
             </div>
             <div class="stat-card">
                 <h3>Active Groups</h3>
@@ -135,11 +150,13 @@
         <!-- Sent Messages Section -->
         <div class="messages-section">
             <div class="messages-header">
-                <h2>✅ Sent Messages (History)</h2>
-                <p>Successfully delivered to Telegram groups</p>
+                <h2>📜 Message History (last 24 hours)</h2>
+                <p>Sent and failed deliveries. Entries older than 24 hours are removed automatically.</p>
             </div>
             <div class="group-content">
                 <button class="btn btn-success" onclick="loadAllMessages()">🔄 Refresh</button>
+                <button class="btn btn-primary" onclick="checkBotAccess()">🩺 Check bot access to all groups</button>
+                <div id="diagResults" style="margin-top: 15px;"></div>
                 <table style="margin-top: 20px;">
                     <thead>
                         <tr>
@@ -172,6 +189,10 @@
             <input type="text" id="newUserId" placeholder="123456789">
             <label>Days Valid</label>
             <input type="number" id="newUserDays" value="30">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: normal; margin-bottom: 15px;">
+                <input type="checkbox" id="alreadyInGroup" style="width: auto; margin: 0;">
+                Already in the group (don't send an invite link)
+            </label>
             <button class="btn btn-primary" onclick="addUser()">Add User</button>
         </div>
     </div>
@@ -181,25 +202,96 @@
         const ADMIN_ID = '8363089809';
         let currentGroupId = null;
         let nextSendTime = 0; // Store when next send will happen
-        
+        let enabledGroups = []; // groups loaded by loadGroups()
+
+        // Escape anything that came from outside (alert text, Telegram names) before putting it in the page
+        function esc(value) {
+            return String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+        }
+
+        function statusBadge(m) {
+            if (m.status === 'failed') {
+                return `<span class="status-failed">❌ FAILED</span><div class="fail-reason">${esc(m.error || 'Unknown error')}</div>`;
+            }
+            return '<span class="status-sent">✅ SENT</span>';
+        }
+
+        function groupKeyFor(groupId) {
+            const g = enabledGroups.find(x => String(x.group_id) === String(groupId));
+            return g ? g.key : null;
+        }
+
+        // FETCH-HELPERS-START
+        const apiErrors = {};
+
+        function renderApiErrors() {
+            const box = document.getElementById('apiError');
+            const items = Object.values(apiErrors);
+            if (items.length === 0) {
+                box.style.display = 'none';
+                box.innerHTML = '';
+                return;
+            }
+            box.style.display = 'block';
+            box.innerHTML = '<strong>⚠️ The dashboard cannot read data from the server.</strong>'
+                + items.map(m => `<div>${esc(m)}</div>`).join('')
+                + '<div class="api-hint">If the reply is a web page or a 404, this page is not being served by the app itself - open it at the address the app runs on (for example http://localhost:5000). If it is a 500, the reason is also in the server log.</div>';
+        }
+
+        // GET JSON from the API. Throws a readable error (and shows the banner) if the reply is not JSON or not OK.
+        async function fetchJson(url) {
+            const path = url.split('?')[0];
+            try {
+                const r = await fetch(url);
+                const type = r.headers.get('content-type') || 'no content-type';
+                const text = await r.text();
+                let data = null;
+                try { data = JSON.parse(text); } catch (e) { /* not JSON */ }
+                if (data === null) {
+                    throw new Error(`${path} answered HTTP ${r.status} (${type}) with a web page instead of JSON: ${text.slice(0, 100).replace(/\s+/g, ' ')}`);
+                }
+                if (!r.ok) {
+                    throw new Error(`${path} answered HTTP ${r.status}${data.error ? ': ' + data.error : ''}`);
+                }
+                delete apiErrors[path];
+                renderApiErrors();
+                return data;
+            } catch (err) {
+                apiErrors[path] = err.message.startsWith(path) ? err.message : `${path}: ${err.message}`;
+                renderApiErrors();
+                throw err;
+            }
+        }
+        // FETCH-HELPERS-END
+
         // Load data on page load
         loadStats();
         loadBuffer();
         loadAllMessages();
         loadGroups();
-        
+
         // Auto-refresh every 5 seconds
         setInterval(() => {
             loadStats();
             loadBuffer();
             loadAllMessages();
         }, 5000);
-        
+
+        // Users + per-group messages refresh every 60 seconds (users need several Telegram calls each)
+        setInterval(refreshGroupData, 60000);
+
+        function refreshGroupData() {
+            enabledGroups.forEach(g => {
+                loadGroupUsers(g.group_id, g.key);
+                loadGroupMessages(g.group_id, g.key);
+            });
+        }
+
         // ⏱️ LIVE COUNTDOWN - Updates every second!
         setInterval(() => {
             const countdown = document.getElementById('countdown');
             const secondsLeft = Math.max(0, nextSendTime - Math.floor(Date.now() / 1000));
-            
+
             if (secondsLeft > 10) {
                 countdown.textContent = `Next send in: ${secondsLeft}s`;
                 countdown.style.color = 'white';
@@ -214,100 +306,103 @@
                 countdown.classList.remove('urgent');
             }
         }, 1000); // Update every 1 second!
-        
+
         function loadStats() {
-            fetch(`${API_BASE}/api/stats`)
-                .then(r => r.json())
+            fetchJson(`${API_BASE}/api/stats`)
                 .then(data => {
                     document.getElementById('statUsers').textContent = data.total_users || 0;
                     document.getElementById('statActive').textContent = data.active_users || 0;
                     document.getElementById('statBuffered').textContent = data.buffered_messages || 0;
                     document.getElementById('statMessages').textContent = data.total_messages || 0;
+                    document.getElementById('statFailed').textContent = data.failed_messages || 0;
                     document.getElementById('statGroups').textContent = data.enabled_groups || 0;
-                });
+                })
+                .catch(err => console.error('Error loading stats:', err));
         }
-        
+
         function loadBuffer() {
-            fetch(`${API_BASE}/api/buffer`)
-                .then(r => r.json())
+            fetchJson(`${API_BASE}/api/buffer`)
                 .then(data => {
                     // Update next send time for live countdown
                     nextSendTime = Math.floor(Date.now() / 1000) + (data.next_send_in_seconds || 0);
-                    
+
                     const bufferGroups = document.getElementById('bufferGroups');
-                    
+
                     if (data.buffer.length === 0) {
                         bufferGroups.innerHTML = '<div class="empty-buffer">No messages in buffer</div>';
                         return;
                     }
-                    
+
                     bufferGroups.innerHTML = data.buffer.map(group => `
                         <div class="buffer-group">
-                            <h3>${group.group_name}</h3>
+                            <h3>${esc(group.group_name)}</h3>
                             <div class="buffer-count">📊 ${group.count} message(s) waiting</div>
                             ${group.messages.map(msg => `
                                 <div class="buffered-message">
-                                    <div class="time">${msg.received_at}</div>
-                                    <div>${msg.message}</div>
+                                    <div class="time">${esc(msg.received_at)}</div>
+                                    <div>${esc(msg.message)}</div>
                                 </div>
                             `).join('')}
                         </div>
                     `).join('');
-                });
+                })
+                .catch(err => console.error('Error loading buffer:', err));
         }
-        
+
         function loadAllMessages() {
-            fetch(`${API_BASE}/api/messages?limit=50`)
-                .then(r => r.json())
+            fetchJson(`${API_BASE}/api/messages?limit=50`)
                 .then(data => {
                     const table = document.getElementById('allMessagesTable');
                     if (data.messages.length === 0) {
-                        table.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No messages yet</td></tr>';
+                        table.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No messages in the last 24 hours</td></tr>';
                         return;
                     }
                     table.innerHTML = data.messages.map(m => `
                         <tr>
-                            <td>${m.timestamp}</td>
-                            <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis;">${m.message}</td>
-                            <td>${m.group_name}</td>
-                            <td><code>${m.keywords}</code></td>
-                            <td><span class="status-sent">✅ SENT</span></td>
+                            <td>${esc(m.timestamp)}</td>
+                            <td style="max-width: 400px; overflow: hidden; text-overflow: ellipsis;">${esc(m.message)}</td>
+                            <td>${esc(m.group_name)}</td>
+                            <td><code>${esc(m.keywords)}</code></td>
+                            <td>${statusBadge(m)}</td>
                         </tr>
                     `).join('');
-                });
+                })
+                .catch(err => console.error('Error loading messages:', err));
         }
-        
+
         function loadGroups() {
-            fetch(`${API_BASE}/api/groups`)
-                .then(r => r.json())
+            fetchJson(`${API_BASE}/api/groups`)
                 .then(data => {
+                    enabledGroups = data.groups.filter(g => g.enabled);
+
                     document.getElementById('groupsGrid').innerHTML = data.groups.map(g => `
                         <div class="group-section">
                             <div class="group-header">
-                                <h2>${g.name}</h2>
-                                <p>Group ID: <code>${g.group_id}</code></p>
+                                <h2>${esc(g.name)}</h2>
+                                <p>Group ID: <code>${esc(g.group_id)}</code></p>
                                 <p style="margin-top: 8px;"><strong>📌 Keyword:</strong></p>
                                 <div class="keywords">
-                                    ${g.keywords.map(k => `<span class="keyword-tag">${k}</span>`).join('')}
+                                    ${g.keywords.map(k => `<span class="keyword-tag">${esc(k)}</span>`).join('')}
                                 </div>
                             </div>
                             <div class="group-content">
                                 ${g.enabled ? `
-                                    <button class="btn btn-primary" onclick="showAddUserModal('${g.group_id}', '${g.name}')">➕ Add User</button>
-                                    
+                                    <button class="btn btn-primary" onclick="showAddUserModal('${esc(g.group_id)}')">➕ Add User</button>
+
                                     <div class="tab-buttons">
-                                        <button class="tab-btn active" onclick="switchTab('${g.key}', 'users')">👥 Users</button>
-                                        <button class="tab-btn" onclick="switchTab('${g.key}', 'admins')">👑 Admins</button>
-                                        <button class="tab-btn" onclick="switchTab('${g.key}', 'messages')">💬 Messages</button>
+                                        <button class="tab-btn active" onclick="switchTab('${g.key}', 'users', this)">👥 Users</button>
+                                        <button class="tab-btn" onclick="switchTab('${g.key}', 'admins', this)">👑 Admins</button>
+                                        <button class="tab-btn" onclick="switchTab('${g.key}', 'messages', this)">💬 Messages</button>
                                     </div>
-                                    
+
                                     <div id="${g.key}-users" class="tab-content active">
+                                        <div class="member-info" id="${g.key}-member-info">Loading...</div>
                                         <table>
                                             <thead>
                                                 <tr>
                                                     <th>User ID</th>
                                                     <th>Name</th>
-                                                    <th>Invited</th>
+                                                    <th>Invited / Joined</th>
                                                     <th>Expires</th>
                                                     <th>Days Left</th>
                                                     <th>Status</th>
@@ -319,7 +414,7 @@
                                             </tbody>
                                         </table>
                                     </div>
-                                    
+
                                     <div id="${g.key}-admins" class="tab-content">
                                         <table>
                                             <thead>
@@ -336,7 +431,7 @@
                                             </tbody>
                                         </table>
                                     </div>
-                                    
+
                                     <div id="${g.key}-messages" class="tab-content">
                                         <table>
                                             <thead>
@@ -360,46 +455,69 @@
                             </div>
                         </div>
                     `).join('');
-                    
-                    data.groups.filter(g => g.enabled).forEach(g => {
+
+                    enabledGroups.forEach(g => {
                         loadGroupUsers(g.group_id, g.key);
                         loadGroupAdmins(g.group_id, g.key);
                         loadGroupMessages(g.group_id, g.key);
                     });
-                });
+                })
+                .catch(err => console.error('Error loading groups:', err));
         }
-        
+
         function loadGroupUsers(groupId, groupKey) {
             const timestamp = new Date().getTime(); // Cache buster
-            fetch(`${API_BASE}/api/group/${groupId}/users?t=${timestamp}`)
-                .then(r => r.json())
+            fetchJson(`${API_BASE}/api/group/${groupId}/users?t=${timestamp}`)
                 .then(data => {
                     const table = document.getElementById(`${groupKey}-users-table`);
-                    if (data.users.length === 0) {
+                    const info = document.getElementById(`${groupKey}-member-info`);
+                    if (!table) return;
+                    const users = data.users || [];
+
+                    if (info) {
+                        const tg = data.telegram_member_count;
+                        info.innerHTML = (tg !== null && tg !== undefined)
+                            ? `Telegram reports <strong>${tg}</strong> member(s) in this group (including admins and the bot) · showing <strong>${users.length}</strong> tracked`
+                            : `Showing <strong>${users.length}</strong> tracked user(s) <span class="fail-reason">(could not read the member count from Telegram)</span>`;
+                    }
+
+                    if (users.length === 0) {
                         table.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No users yet</td></tr>';
                         return;
                     }
-                    table.innerHTML = data.users.map(u => `
+
+                    table.innerHTML = users.map(u => {
+                        const hasPlan = u.has_plan !== false;
+                        const status = hasPlan
+                            ? `<span class="${u.joined ? 'status-joined' : 'status-pending'}">${u.joined ? '✅ Joined' : '⏳ Pending'}</span>`
+                            : '<span class="status-joined">✅ Joined</span> <span class="no-plan">no plan</span>';
+                        const actions = hasPlan
+                            ? `<button class="btn btn-warning btn-sm" onclick="extendUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Extend</button>
+                               <button class="btn btn-primary btn-sm" onclick="reduceUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Reduce</button>
+                               <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Remove</button>`
+                            : `<button class="btn btn-success btn-sm" onclick="setPlan('${groupId}', '${u.user_id}')" style="margin: 2px;">Set plan</button>
+                               <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Remove</button>`;
+                        return `
                         <tr>
-                            <td><code>${u.user_id}</code></td>
-                            <td>${u.name}</td>
-                            <td>${u.invited_date}</td>
-                            <td>${u.expiry_date}</td>
-                            <td>${u.days_left} days</td>
-                            <td><span class="${u.joined ? 'status-joined' : 'status-pending'}">${u.joined ? '✅ Joined' : '⏳ Pending'}</span></td>
-                            <td style="min-width: 280px;">
-                                <button class="btn btn-warning btn-sm" onclick="extendUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Extend</button>
-                                <button class="btn btn-primary btn-sm" onclick="reduceUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Reduce</button>
-                                <button class="btn btn-danger btn-sm" onclick="removeUser('${groupId}', '${u.user_id}')" style="margin: 2px;">Remove</button>
-                            </td>
-                        </tr>
-                    `).join('');
+                            <td><code>${esc(u.user_id)}</code></td>
+                            <td>${esc(u.name)}</td>
+                            <td>${esc(u.invited_date)}</td>
+                            <td>${hasPlan ? esc(u.expiry_date) : '—'}</td>
+                            <td>${hasPlan ? esc(u.days_left) + ' days' : '—'}</td>
+                            <td>${status}</td>
+                            <td style="min-width: 280px;">${actions}</td>
+                        </tr>`;
+                    }).join('');
+                })
+                .catch(err => {
+                    const table = document.getElementById(`${groupKey}-users-table`);
+                    if (table) table.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f44336;">Error loading users</td></tr>';
+                    console.error('Error loading users:', err);
                 });
         }
-        
+
         function loadGroupAdmins(groupId, groupKey) {
-            fetch(`${API_BASE}/api/group/${groupId}/admins`)
-                .then(r => r.json())
+            fetchJson(`${API_BASE}/api/group/${groupId}/admins`)
                 .then(data => {
                     const table = document.getElementById(`${groupKey}-admins-table`);
                     if (!data.admins || data.admins.length === 0) {
@@ -408,10 +526,10 @@
                     }
                     table.innerHTML = data.admins.map(a => `
                         <tr>
-                            <td><code>${a.user_id}</code></td>
-                            <td>${a.first_name}</td>
-                            <td>${a.username ? '@' + a.username : '-'}</td>
-                            <td><strong style="color: ${a.status === 'creator' ? '#f39c12' : '#667eea'};">${a.status.toUpperCase()}</strong></td>
+                            <td><code>${esc(a.user_id)}</code></td>
+                            <td>${esc(a.first_name)}</td>
+                            <td>${a.username ? '@' + esc(a.username) : '-'}</td>
+                            <td><strong style="color: ${a.status === 'creator' ? '#f39c12' : '#667eea'};">${esc(a.status.toUpperCase())}</strong></td>
                             <td>${a.is_bot ? '🤖 Bot' : '👤 User'}</td>
                         </tr>
                     `).join('');
@@ -422,74 +540,143 @@
                     console.error('Error loading admins:', error);
                 });
         }
-        
+
         function loadGroupMessages(groupId, groupKey) {
-            fetch(`${API_BASE}/api/group/${groupId}/messages?limit=20`)
-                .then(r => r.json())
+            fetchJson(`${API_BASE}/api/group/${groupId}/messages?limit=20`)
                 .then(data => {
                     const table = document.getElementById(`${groupKey}-messages-table`);
+                    if (!table) return;
                     if (data.messages.length === 0) {
-                        table.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">No messages yet</td></tr>';
+                        table.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">No messages in the last 24 hours</td></tr>';
                         return;
                     }
                     table.innerHTML = data.messages.map(m => `
                         <tr>
-                            <td>${m.timestamp}</td>
-                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${m.message}</td>
-                            <td><code>${m.keywords}</code></td>
-                            <td><span class="status-sent">✅ SENT</span></td>
+                            <td>${esc(m.timestamp)}</td>
+                            <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${esc(m.message)}</td>
+                            <td><code>${esc(m.keywords)}</code></td>
+                            <td>${statusBadge(m)}</td>
                         </tr>
                     `).join('');
-                });
+                })
+                .catch(err => console.error('Error loading group messages:', err));
         }
-        
-        function switchTab(groupKey, tab) {
+
+        function switchTab(groupKey, tab, btn) {
             document.querySelectorAll(`#${groupKey}-users, #${groupKey}-admins, #${groupKey}-messages`).forEach(el => el.classList.remove('active'));
             document.getElementById(`${groupKey}-${tab}`).classList.add('active');
-            event.target.parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            event.target.classList.add('active');
+            btn.parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
         }
-        
-        function showAddUserModal(groupId, groupName) {
+
+        function showAddUserModal(groupId) {
             currentGroupId = groupId;
-            document.getElementById('modalTitle').textContent = `Add User to ${groupName}`;
+            const g = enabledGroups.find(x => String(x.group_id) === String(groupId));
+            document.getElementById('modalTitle').textContent = `Add User to ${g ? g.name : 'group'}`;
             document.getElementById('addUserModal').style.display = 'block';
         }
-        
+
         function closeModal(id) {
             document.getElementById(id).style.display = 'none';
         }
-        
+
+        // Diagnostic: checks the bot can post in every group (sends nothing)
+        function checkBotAccess() {
+            const box = document.getElementById('diagResults');
+            box.innerHTML = '<p style="color:#666;">Checking every group... this can take a few seconds.</p>';
+            fetchJson(`${API_BASE}/api/check-all-groups?admin_id=${ADMIN_ID}`)
+                .then(data => {
+                    if (data.error) {
+                        box.innerHTML = `<p class="fail-reason">❌ ${esc(data.error)}</p>`;
+                        return;
+                    }
+                    box.innerHTML = `
+                        <table>
+                            <thead><tr><th>Group</th><th>Group ID</th><th>Bot is</th><th>Result</th></tr></thead>
+                            <tbody>
+                                ${data.groups.map(g => `
+                                    <tr>
+                                        <td>${esc(g.name)}${g.enabled ? '' : ' <span class="no-plan">(disabled)</span>'}</td>
+                                        <td><code>${esc(g.group_id)}</code></td>
+                                        <td>${esc(g.bot_status || '—')}</td>
+                                        <td>
+                                            ${g.ok ? '<span class="status-sent">✅ Can post</span>' : `<span class="status-failed">❌ Cannot post</span><div class="fail-reason">${esc(g.reason)}</div>`}
+                                            ${(g.warnings || []).map(w => `<div class="warn-reason">⚠️ ${esc(w)}</div>`).join('')}
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>`;
+                })
+                .catch(err => {
+                    box.innerHTML = `<p class="fail-reason">❌ Request failed: ${esc(err.message)}</p>`;
+                });
+        }
+
         function addUser() {
             const userId = document.getElementById('newUserId').value.trim();
             const days = document.getElementById('newUserDays').value;
             if (!userId) { alert('Please enter User ID'); return; }
-            
+
             fetch(`${API_BASE}/api/user/add`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ admin_id: ADMIN_ID, group_id: currentGroupId, user_id: userId, days: days })
+                body: JSON.stringify({ admin_id: ADMIN_ID, group_id: currentGroupId, user_id: userId, days: days, invite: !document.getElementById('alreadyInGroup').checked })
             })
             .then(r => r.json())
             .then(data => {
                 if (data.success) {
-                    alert('✅ User added! Invite link sent via Telegram.');
+                    if (!data.invite_link) {
+                        alert(`✅ ${data.name || 'User'} added to the table (no invite sent).`);
+                    } else if (data.dm_sent) {
+                        alert('✅ User added! Invite link sent via Telegram.');
+                    } else {
+                        alert(`⚠️ User added, but the invite link could not be sent by Telegram.\nReason: ${data.dm_error || 'unknown'}\n\nSend them this link yourself:\n${data.invite_link}`);
+                    }
                     closeModal('addUserModal');
                     document.getElementById('newUserId').value = '';
                     loadGroups();
                 } else {
                     alert('❌ Error: ' + data.error);
                 }
+            })
+            .catch(err => {
+                alert(`❌ Network error: ${err.message}`);
             });
         }
-        
+
+        // Start a plan for someone who is already in the group (no invite link is sent)
+        function setPlan(groupId, userId) {
+            const days = prompt('Start a plan for this member. How many days?', '30');
+            if (!days || parseInt(days) <= 0) return;
+
+            fetch(`${API_BASE}/api/user/add`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ admin_id: ADMIN_ID, group_id: groupId, user_id: userId, days: parseInt(days), invite: false })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert(`✅ Plan of ${days} days started.`);
+                    const key = groupKeyFor(groupId);
+                    if (key) loadGroupUsers(groupId, key);
+                } else {
+                    alert('❌ Error: ' + data.error);
+                }
+            })
+            .catch(err => {
+                alert(`❌ Network error: ${err.message}`);
+            });
+        }
+
         function extendUser(groupId, userId) {
             const days = prompt('Extend by how many days?', '30');
             if (!days || days <= 0) return;
-            
+
             const confirmed = confirm(`Extend user subscription by ${days} days?`);
             if (!confirmed) return;
-            
+
             fetch(`${API_BASE}/api/user/extend`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -508,17 +695,17 @@
                 alert(`❌ Network error: ${err.message}`);
             });
         }
-        
+
         function reduceUser(groupId, userId) {
             const days = prompt('Reduce by how many days?', '1');
             if (!days || days <= 0) return;
-            
+
             console.log('Reducing user:', userId, 'by', days, 'days');
-            
+
             // Show loading feedback
             const confirmed = confirm(`Reduce user subscription by ${days} days?`);
             if (!confirmed) return;
-            
+
             fetch(`${API_BASE}/api/user/reduce`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -543,7 +730,7 @@
                 alert(`❌ Network error: ${err.message}`);
             });
         }
-        
+
         function removeUser(groupId, userId) {
             if (!confirm('Remove this user from group and database?')) return;
             fetch(`${API_BASE}/api/user/remove`, {
