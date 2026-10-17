@@ -156,6 +156,7 @@
             <div class="group-content">
                 <button class="btn btn-success" onclick="loadAllMessages()">🔄 Refresh</button>
                 <button class="btn btn-primary" onclick="checkBotAccess()">🩺 Check bot access to all groups</button>
+                <button class="btn btn-success" onclick="syncAllGroups()">🔄 Sync members from Telegram (all groups)</button>
                 <div id="diagResults" style="margin-top: 15px;"></div>
                 <table style="margin-top: 20px;">
                     <thead>
@@ -388,6 +389,7 @@
                             <div class="group-content">
                                 ${g.enabled ? `
                                     <button class="btn btn-primary" onclick="showAddUserModal('${esc(g.group_id)}')">➕ Add User</button>
+                                    <button class="btn btn-success" onclick="syncGroupButton('${esc(g.group_id)}')">🔄 Sync members</button>
 
                                     <div class="tab-buttons">
                                         <button class="tab-btn active" onclick="switchTab('${g.key}', 'users', this)">👥 Users</button>
@@ -611,6 +613,44 @@
                 .catch(err => {
                     box.innerHTML = `<p class="fail-reason">❌ Request failed: ${esc(err.message)}</p>`;
                 });
+        }
+
+        // Pull the real member list of a group from Telegram (needs the member-sync settings on the server)
+        function syncGroup(groupId) {
+            return fetch(`${API_BASE}/api/group/${groupId}/sync`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ admin_id: ADMIN_ID })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) throw new Error(data.error || 'Unknown error');
+                const key = groupKeyFor(groupId);
+                if (key) loadGroupUsers(groupId, key);
+                return data;
+            });
+        }
+
+        function syncGroupButton(groupId) {
+            syncGroup(groupId)
+                .then(d => alert(`✅ Synced: ${d.total} member(s) now in the table (${d.added} new, ${d.removed} no longer in the group). Admins and bots are not listed here.`))
+                .catch(err => alert(`❌ ${err.message}`));
+        }
+
+        async function syncAllGroups() {
+            const box = document.getElementById('diagResults');
+            const lines = [];
+            for (const g of enabledGroups) {
+                box.innerHTML = `<p style="color:#666;">Syncing ${esc(g.name)}...</p>` + lines.join('');
+                try {
+                    const d = await syncGroup(g.group_id);
+                    lines.push(`<div class="status-sent">✅ ${esc(g.name)}: ${d.total} member(s) (${d.added} new, ${d.removed} removed)</div>`);
+                } catch (err) {
+                    lines.push(`<div class="fail-reason">❌ ${esc(g.name)}: ${esc(err.message)}</div>`);
+                    if (/not set up/.test(err.message)) break;  // no point trying every group
+                }
+            }
+            box.innerHTML = lines.join('') || '<p style="color:#666;">No enabled groups.</p>';
         }
 
         function addUser() {
