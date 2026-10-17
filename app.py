@@ -1948,6 +1948,105 @@ def api_check_all_groups():
         results = [f.result() for f in futures]
     return jsonify({'groups': results}), 200
 
+# ═══════════════════════════════════════════════════════════════════════════
+# 👥 MEMBER SYNC (optional) - lists EVERYONE currently in a group
+# A bot cannot list group members, so this uses a normal Telegram account through the Telethon library.
+# Needs the env vars TELEGRAM_API_ID, TELEGRAM_API_HASH and TELEGRAM_SESSION (create the last one with telethon_login.py).
+# Without them this feature does nothing and the rest of the app is unaffected.
+# ═══════════════════════════════════════════════════════════════════════════
+
+TELEGRAM_API_ID = os.environ.get('TELEGRAM_API_ID', '').strip()
+TELEGRAM_API_HASH = os.environ.get('TELEGRAM_API_HASH', '').strip()
+TELEGRAM_SESSION = os.environ.get('TELEGRAM_SESSION', '').strip()
+
+def member_sync_configured():
+    return bool(TELEGRAM_API_ID and TELEGRAM_API_HASH and TELEGRAM_SESSION)
+
+def fetch_group_members_telethon(group_id):
+    """Everyone in the group according to Telegram, as a list of dicts. Raises RuntimeError with a readable reason."""
+    try:
+        from telethon import TelegramClient
+        from telethon.sessions import StringSession
+    except ImportError:
+        raise RuntimeError("The 'telethon' package is not installed - add a line 'telethon' to requirements.txt and redeploy")
+    import asyncio
+
+    async def _run():
+        client = TelegramClient(StringSession(TELEGRAM_SESSION), int(TELEGRAM_API_ID), TELEGRAM_API_HASH)
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                raise RuntimeError("The saved Telegram login (TELEGRAM_SESSION) is no longer valid - run telethon_login.py again and update the variable")
+            try:
+                entity = await client.get_entity(int(group_id))
+            except ValueError:
+                await client.get_dialogs()  # lets the session learn about the account's groups, then retry
+                try:
+                    entity = await client.get_entity(int(group_id))
+                except ValueError:
+                    raise RuntimeError(f"The Telegram account used for syncing cannot see group {group_id} - is it a member of that group?")
+            people = []
+            async for u in client.iter_participants(entity):
+                role = type(getattr(u, 'participant', None)).__name__
+                people.append({
+                    'id': u.id,
+                    'first_name': u.first_name,
+                    'last_name': u.last_name,
+                    'username': u.username,
+                    'is_bot': bool(getattr(u, 'bot', False)),
+                    'deleted': bool(getattr(u, 'deleted', False)),
+                    'is_admin': ('Admin' in role) or ('Creator' in role)
+                })
+            return people
+        finally:
+            await client.disconnect()
+
+    return asyncio.run(_run())
+
+def sync_group_members(group_id):
+    """Make the members table match who is really in the group (admins, bots and deleted accounts are left out)"""
+    people = fetch_group_members_telethon(group_id)
+    keep = [p for p in people if not p['is_bot'] and not p['deleted'] and not p['is_admin']]
+
+    existing = {str(m[0]) for m in get_members_by_group(group_id)}
+    current = {str(p['id']) for p in keep}
+
+    for p in keep:
+        upsert_member(group_id, p['id'], _display_name(p), p.get('username'))
+
+    removed = existing - current
+    for user_id in removed:
+        delete_member(group_id, user_id)
+
+    return {
+        'total': len(keep),
+        'added': len(current - existing),
+        'removed': len(removed),
+        'telegram_total': len(people)
+    }
+
+@app.route('/api/group/<group_id>/sync', methods=['POST'])
+def api_sync_group(group_id):
+    """Pull the real member list of a group from Telegram into the dashboard (admin only)"""
+    data = request.json or {}
+    if str(data.get('admin_id')) != str(ADMIN_USER_ID):
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    if str(group_id) not in {str(g['group_id']) for g in GROUPS.values()}:
+        return jsonify({'error': f'Group {group_id} is not one of the configured groups'}), 404
+
+    if not member_sync_configured():
+        return jsonify({'error': 'Member sync is not set up yet - it needs the TELEGRAM_API_ID, TELEGRAM_API_HASH and TELEGRAM_SESSION settings.'}), 400
+
+    try:
+        result = sync_group_members(group_id)
+    except Exception as e:
+        print(f"❌ Member sync failed for {group_id}: {type(e).__name__}: {e}", flush=True)
+        return jsonify({'error': f'{e}' if isinstance(e, RuntimeError) else f'{type(e).__name__}: {e}'}), 500
+
+    print(f"👥 Member sync {group_id}: {result}", flush=True)
+    return jsonify({'success': True, **result}), 200
+
 @app.route('/api/config', methods=['GET'])
 def api_config():
     """Get configuration"""
