@@ -8,7 +8,7 @@
     ✅ AUTOMATIC USER REMOVAL (kicks from Telegram + removes from database)
     ✅ Multi-database support (SQLite for local, PostgreSQL for production)
     ✅ Real-time dashboard
-    ✅ Weekly message cleanup (7 days)
+    ✅ 24-hour message retention (cleanup runs hourly)
     
     For LOCAL testing:
     - Uses SQLite database (no setup needed)
@@ -25,6 +25,7 @@ import os
 import threading
 from collections import defaultdict
 import logging
+import hashlib
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
@@ -374,14 +375,16 @@ def add_to_buffer(group_id, group_name, message, keyword):
         print(f"📥 Added to buffer: {group_name} (Total: {len(message_buffer[group_id])})")
 
 def process_buffer():
-    """Background thread - sends buffered messages every 60 seconds"""
+    """Background thread - sends buffered messages every 60 seconds.
+    Every attempt (sent OR failed) is written to the messages table; failures include the reason."""
     global last_batch_time
     print("🔄 Buffer thread starting...")
-    
+
     while True:
         try:
             time.sleep(60)  # Wait 60 seconds
-            
+            last_batch_time = datetime.now()  # dashboard countdown restarts every cycle
+
             # Take snapshot of buffer and clear it
             buffer_snapshot = {}
             with buffer_lock:
@@ -390,29 +393,39 @@ def process_buffer():
                         if msgs:
                             buffer_snapshot[gid] = msgs.copy()
                     message_buffer.clear()
-            
+
             # Send buffered messages (only log if there are messages)
             if buffer_snapshot:
                 print("\n" + "="*70, flush=True)
                 print(f"📤 BUFFER SEND: {len(buffer_snapshot)} group(s)", flush=True)
-                
+
                 for idx, (gid, msgs) in enumerate(buffer_snapshot.items()):
                     # Combine all messages for this group
                     combined = "\n\n\n".join([m['message'] for m in msgs])
-                    
-                    if send_to_telegram(gid, combined):
-                        # Log the combined message
-                        log_message(combined, gid, msgs[0]['group_name'], 
-                                  ", ".join(set([m['keyword'] for m in msgs])))
-                        print(f"✅ Sent to {msgs[0]['group_name']} ({len(msgs)} messages)", flush=True)
-                    
+                    group_name = msgs[0]['group_name']
+                    keywords = ", ".join(set([m['keyword'] for m in msgs]))
+
+                    ok, reason = send_to_telegram(gid, combined)
+
+                    if ok:
+                        print(f"✅ Sent to {group_name} ({len(msgs)} messages)", flush=True)
+                        status, error = 'sent', None
+                    else:
+                        print(f"❌ FAILED to send to {group_name} (group_id {gid}, {len(msgs)} message(s)): {reason}", flush=True)
+                        status, error = 'failed', reason
+
+                    # Log the attempt (sent or failed) - a DB problem must not stop the other groups
+                    try:
+                        log_message(combined, gid, group_name, keywords, status=status, error=error)
+                    except Exception as log_error:
+                        print(f"⚠️ Could not write to message log: {log_error}", flush=True)
+
                     # Delay between groups to avoid rate limits
                     if idx < len(buffer_snapshot) - 1:
                         time.sleep(5)  # 5 seconds between groups
-                
-                last_batch_time = datetime.now()
+
                 print("="*70 + "\n", flush=True)
-                
+
         except Exception as e:
             print(f"❌ Buffer error: {e}", flush=True)
 
@@ -460,29 +473,30 @@ print("✅ Momentum auto-reset thread started (23h cycle)")
 # 🗑️ WEEKLY MESSAGE CLEANUP (only messages table, nothing else)
 # ═══════════════════════════════════════════════════════════════════════════
 
+MESSAGE_RETENTION_HOURS = 24
+
 def cleanup_old_messages():
-    """Background thread - deletes messages older than 7 days every week"""
+    """Background thread - every hour, deletes messages older than 24 hours"""
+    time.sleep(30)  # let init_database() finish on startup
     while True:
-        time.sleep(604800)  # 7 days in seconds
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            
-            if DATABASE_TYPE == 'sqlite':
-                cursor.execute("DELETE FROM messages WHERE timestamp < datetime('now', '-7 days')")
-            elif DATABASE_TYPE == 'postgresql':
-                cursor.execute("DELETE FROM messages WHERE timestamp < NOW() - INTERVAL '7 days'")
-            
+            placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
+            cutoff = db_timestamp(datetime.now() - timedelta(hours=MESSAGE_RETENTION_HOURS))
+            cursor.execute(f"DELETE FROM messages WHERE timestamp < {placeholder}", (cutoff,))
             deleted = cursor.rowcount
             conn.commit()
             conn.close()
-            print(f"🗑️ Weekly cleanup done - deleted {deleted} old messages", flush=True)
+            if deleted:
+                print(f"🗑️ Cleanup done - deleted {deleted} message(s) older than {MESSAGE_RETENTION_HOURS}h", flush=True)
         except Exception as e:
             print(f"❌ Cleanup error: {e}", flush=True)
+        time.sleep(3600)  # run again in an hour
 
 cleanup_thread = threading.Thread(target=cleanup_old_messages, daemon=True)
 cleanup_thread.start()
-print("✅ Weekly message cleanup thread started")
+print("✅ Message cleanup thread started (hourly, deletes messages older than 24h)")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🗑️ AUTOMATIC USER REMOVAL (checks every hour, removes expired users)
@@ -543,14 +557,14 @@ def auto_remove_expired_users():
                         
                         # Delete from database
                         remove_user(group_id, user_id)
+                        delete_member(group_id, user_id)
                         removed_count += 1
                         
-                        # Notify user
-                        try:
-                            send_to_telegram(user_id, "⏰ Your subscription has expired. You have been removed from the group. Please contact admin to renew.")
-                        except Exception as notify_error:
-                            print(f"   ⚠️ Could not notify user {user_id}: {notify_error}", flush=True)
-                        
+                        # Notify user (a failure here is only a warning)
+                        notify_ok, notify_reason = send_to_telegram(user_id, "⏰ Your subscription has expired. You have been removed from the group. Please contact admin to renew.")
+                        if not notify_ok:
+                            print(f"   ⚠️ Could not notify user {user_id}: {notify_reason}", flush=True)
+
                         time.sleep(1)  # Delay between removals
                     except Exception as user_error:
                         print(f"   ❌ Failed to remove user {user_id}: {user_error}", flush=True)
@@ -648,6 +662,37 @@ def init_database():
             )
         ''')
     
+    # --- Migrations + members table (who is currently in each group) ---
+    if DATABASE_TYPE == 'sqlite':
+        existing_cols = [row[1] for row in cursor.execute("PRAGMA table_info(messages)").fetchall()]
+        if 'status' not in existing_cols:
+            cursor.execute("ALTER TABLE messages ADD COLUMN status TEXT DEFAULT 'sent'")
+        if 'error' not in existing_cols:
+            cursor.execute("ALTER TABLE messages ADD COLUMN error TEXT")
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS members (
+                user_id TEXT,
+                group_id TEXT,
+                name TEXT,
+                username TEXT,
+                joined_at TEXT,
+                PRIMARY KEY (user_id, group_id)
+            )
+        ''')
+    elif DATABASE_TYPE == 'postgresql':
+        cursor.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'sent'")
+        cursor.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS error TEXT")
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS members (
+                user_id VARCHAR(100),
+                group_id VARCHAR(100),
+                name VARCHAR(200),
+                username VARCHAR(100),
+                joined_at TIMESTAMP,
+                PRIMARY KEY (user_id, group_id)
+            )
+        ''')
+
     conn.commit()
     conn.close()
     print("✅ Database initialized")
@@ -658,42 +703,71 @@ init_database()
 # 📱 TELEGRAM FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _tg_failure_from_json(data):
+    """Readable reason from a parsed Telegram API error response"""
+    params = data.get('parameters') or {}
+    extra = ''
+    if 'migrate_to_chat_id' in params:
+        extra = f" -> this group was upgraded to a supergroup, its new chat ID is {params['migrate_to_chat_id']}"
+    elif 'retry_after' in params:
+        extra = f" -> rate limited, retry after {params['retry_after']}s"
+    return f"Telegram error {data.get('error_code', '?')}: {data.get('description', 'Unknown error')}{extra}"
+
+def _failure_reason(response, exc):
+    """Readable reason for a failed request (Telegram said no, or the request itself blew up)"""
+    if response is not None:
+        try:
+            return _tg_failure_from_json(response.json())
+        except ValueError:
+            return f"HTTP {response.status_code}: {response.text[:200]}"
+    return f"{type(exc).__name__}: {exc}"
+
+def _post_message(chat_id, text):
+    """Send ONE message. Returns (ok, reason). Retries once if Telegram rate-limits us (429)."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    for attempt in range(2):
+        response = None
+        try:
+            response = requests.post(url, json={'chat_id': int(chat_id), 'text': text}, timeout=10)
+            if response.status_code == 200 and response.json().get('ok'):
+                return True, None
+            if response.status_code == 429 and attempt == 0:
+                retry_after = (response.json().get('parameters') or {}).get('retry_after', 5)
+                wait = min(int(retry_after), 30)
+                print(f"⏳ Telegram rate limit hit - waiting {wait}s, then retrying once", flush=True)
+                time.sleep(wait)
+                continue
+            return False, _failure_reason(response, None)
+        except Exception as e:
+            return False, _failure_reason(response, e)
+    return False, "Rate limited by Telegram (retry also failed)"
+
 def send_to_telegram(group_id, text):
-    """Send message to Telegram group with smart splitting for long messages"""
+    """Send a message to a chat, splitting long ones. Returns (ok, reason) - reason is None on success."""
     MAX_CHUNK_SIZE = 2500  # Target size (well below Telegram's 4096 limit)
     BUFFER_SIZE = 200      # Buffer to avoid breaking messages
-    
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    
+    TELEGRAM_HARD_LIMIT = 4000
+
     # If message is short enough, send directly
     if len(text) <= MAX_CHUNK_SIZE:
-        payload = {'chat_id': int(group_id), 'text': text}
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            response.raise_for_status()
-            return True
-        except Exception as e:
-            print(f"❌ Failed to send to {group_id}: {e}")
-            try:
-                error_details = response.json()
-                print(f"   Telegram API Response: {error_details}")
-            except:
-                pass
-            return False
-    
+        ok, reason = _post_message(group_id, text)
+        if not ok:
+            print(f"❌ Failed to send to {group_id}: {reason}", flush=True)
+        return ok, reason
+
     # Message is too long - need to split intelligently
     print(f"📏 Message is {len(text)} chars - splitting into chunks...")
-    
+
     # Split by message separator (3 newlines between messages)
     individual_messages = text.split("\n\n\n")
-    
+
     chunks = []
     current_chunk = []
     current_length = 0
-    
+
     for msg in individual_messages:
         msg_length = len(msg)
-        
+
         # If adding this message would exceed limit (with buffer)
         if current_length + msg_length + 3 > MAX_CHUNK_SIZE - BUFFER_SIZE:
             # Save current chunk if it has content
@@ -701,49 +775,85 @@ def send_to_telegram(group_id, text):
                 chunks.append("\n\n\n".join(current_chunk))
                 current_chunk = []
                 current_length = 0
-            
-            # If single message is too long, we still need to send it
-            # (Telegram limit is 4096, so 2500+ single messages will still go through)
+
             if msg_length > MAX_CHUNK_SIZE:
-                chunks.append(msg)
+                # A single huge message: Telegram rejects >4096 chars, so cut it up
+                for i in range(0, msg_length, TELEGRAM_HARD_LIMIT):
+                    chunks.append(msg[i:i + TELEGRAM_HARD_LIMIT])
             else:
                 current_chunk = [msg]
                 current_length = msg_length
         else:
-            # Add message to current chunk
             current_chunk.append(msg)
             current_length += msg_length + 3  # +3 for separator
-    
+
     # Don't forget the last chunk
     if current_chunk:
         chunks.append("\n\n\n".join(current_chunk))
-    
+
     print(f"✂️ Split into {len(chunks)} chunks:")
     for i, chunk in enumerate(chunks):
         print(f"   Chunk {i+1}: {len(chunk)} characters")
-    
+
     # Send all chunks with small delay between them
-    all_sent = True
+    failures = []
     for i, chunk in enumerate(chunks):
-        payload = {'chat_id': int(group_id), 'text': chunk}
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            response.raise_for_status()
+        ok, reason = _post_message(group_id, chunk)
+        if ok:
             print(f"✅ Sent chunk {i+1}/{len(chunks)}")
-            
-            # Small delay between chunks (except for last one)
-            if i < len(chunks) - 1:
-                time.sleep(1)
-        except Exception as e:
-            print(f"❌ Failed to send chunk {i+1}/{len(chunks)} to {group_id}: {e}")
-            try:
-                error_details = response.json()
-                print(f"   Telegram API Response: {error_details}")
-            except:
-                pass
-            all_sent = False
-    
-    return all_sent
+        else:
+            print(f"❌ Failed to send chunk {i+1}/{len(chunks)} to {group_id}: {reason}", flush=True)
+            failures.append(f"chunk {i+1}/{len(chunks)}: {reason}")
+        if i < len(chunks) - 1:
+            time.sleep(1)
+
+    if failures:
+        return False, "; ".join(failures)
+    return True, None
+
+def get_member_count(group_id):
+    """How many members Telegram says the group has (None if it can't be read)"""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChatMemberCount"
+    try:
+        data = requests.post(url, json={'chat_id': int(group_id)}, timeout=10).json()
+        if data.get('ok'):
+            return data['result']
+    except Exception:
+        pass
+    return None
+
+# Secret Telegram sends back with every update so we can reject fakes (derived from the bot token unless overridden)
+TELEGRAM_WEBHOOK_SECRET = os.environ.get('TELEGRAM_WEBHOOK_SECRET') or hashlib.sha256(TELEGRAM_BOT_TOKEN.encode()).hexdigest()[:48]
+# Public https address of this app (Render sets RENDER_EXTERNAL_URL automatically)
+PUBLIC_URL = os.environ.get('PUBLIC_URL') or os.environ.get('RENDER_EXTERNAL_URL') or ''
+
+def set_telegram_webhook(public_url):
+    """Register /webhook/telegram so Telegram tells us when people join/leave. Returns (ok, detail)."""
+    public_url = public_url.strip().rstrip('/')
+    if public_url.startswith('http://') and 'localhost' not in public_url and '127.0.0.1' not in public_url:
+        public_url = 'https://' + public_url[len('http://'):]
+    target = f"{public_url}/webhook/telegram"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook"
+    payload = {
+        'url': target,
+        'secret_token': TELEGRAM_WEBHOOK_SECRET,
+        'allowed_updates': ['message', 'chat_member', 'my_chat_member']
+    }
+    try:
+        data = requests.post(url, json=payload, timeout=10).json()
+        if data.get('ok'):
+            return True, target
+        return False, _tg_failure_from_json(data)
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+def _display_name(user):
+    """@username if there is one, otherwise the first/last name"""
+    if user.get('username'):
+        return f"@{user['username']}"
+    full = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+    return full or 'Unknown'
+
 
 def create_invite_link(group_id, expire_days=30):
     """Create invite link for group"""
@@ -824,6 +934,17 @@ def get_user_info(user_id):
     except:
         return "Unknown"
 
+def get_group_member(group_id, user_id):
+    """Ask Telegram about one user in a group. Returns the member dict (status + user) or {'error': reason}"""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChatMember"
+    try:
+        data = requests.post(url, json={'chat_id': int(group_id), 'user_id': int(user_id)}, timeout=10).json()
+        if data.get('ok'):
+            return data['result']
+        return {'error': _tg_failure_from_json(data)}
+    except Exception as e:
+        return {'error': f"{type(e).__name__}: {e}"}
+
 def get_group_admins(group_id):
     """Get all admins from Telegram group"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getChatAdministrators"
@@ -853,7 +974,7 @@ def get_group_admins(group_id):
 # 🗃️ DATABASE FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
 
-def add_user(group_id, user_id, days):
+def add_user(group_id, user_id, days, name=None):
     """Add user to group - ALWAYS store as strings for consistency"""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -862,7 +983,7 @@ def add_user(group_id, user_id, days):
     group_id = str(group_id)
     user_id = str(user_id)
     
-    name = get_user_info(user_id)
+    name = name or get_user_info(user_id)
     invited_date = datetime.now()
     expiry_date = datetime.now() + timedelta(days=days)
     
@@ -1041,62 +1162,120 @@ def remove_user(group_id, user_id):
     conn.close()
     print(f"🗑️ User {user_id} removed from database for group {group_id}", flush=True)
 
-def log_message(message, group_id, group_name, matched_keywords):
-    """Log message sent to group"""
+def db_timestamp(dt):
+    """Format a datetime the way the active database stores it"""
+    return dt.strftime('%Y-%m-%d %H:%M:%S') if DATABASE_TYPE == 'sqlite' else dt
+
+def _parse_dt(value):
+    """Datetime or stored string -> naive datetime"""
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    return datetime.strptime(str(value).split('.')[0], '%Y-%m-%d %H:%M:%S')
+
+def _fmt_ts(value):
+    return value.strftime('%Y-%m-%d %H:%M:%S') if isinstance(value, datetime) else str(value)
+
+def upsert_member(group_id, user_id, name, username=None):
+    """Remember that this user is currently in this group"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    timestamp = datetime.now()
-    
+    group_id = str(group_id)
+    user_id = str(user_id)
+    joined_at = db_timestamp(datetime.now())
+
     if DATABASE_TYPE == 'sqlite':
-        timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
         cursor.execute('''
-            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords)
+            INSERT INTO members (user_id, group_id, name, username, joined_at)
             VALUES (?, ?, ?, ?, ?)
-        ''', (timestamp_str, message, group_id, group_name, matched_keywords))
-    elif DATABASE_TYPE == 'postgresql':
+            ON CONFLICT(user_id, group_id) DO UPDATE SET name=excluded.name, username=excluded.username
+        ''', (user_id, group_id, name, username, joined_at))
+    else:
         cursor.execute('''
-            INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords)
+            INSERT INTO members (user_id, group_id, name, username, joined_at)
             VALUES (%s, %s, %s, %s, %s)
-        ''', (timestamp, message, group_id, group_name, matched_keywords))
-    
+            ON CONFLICT (user_id, group_id) DO UPDATE SET name=EXCLUDED.name, username=EXCLUDED.username
+        ''', (user_id, group_id, name, username, joined_at))
+
     conn.commit()
     conn.close()
 
-def get_messages_by_group(group_id, limit=50):
-    """Get messages for specific group"""
+def delete_member(group_id, user_id):
+    """Forget a member (they left, were kicked or were removed)"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+    placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
+    cursor.execute(f'DELETE FROM members WHERE group_id = {placeholder} AND user_id = {placeholder}', (str(group_id), str(user_id)))
+    conn.commit()
+    conn.close()
+
+def get_members_by_group(group_id):
+    """Members we have seen join (or speak) in this group"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
     placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
     cursor.execute(f'''
-        SELECT timestamp, message, matched_keywords
-        FROM messages
+        SELECT user_id, name, username, joined_at
+        FROM members
         WHERE group_id = {placeholder}
+        ORDER BY joined_at DESC
+    ''', (str(group_id),))
+    members = cursor.fetchall()
+    conn.close()
+    return members
+
+def log_message(message, group_id, group_name, matched_keywords, status='sent', error=None):
+    """Log a send attempt: status is 'sent' or 'failed'; error holds the reason for a failure"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
+    cursor.execute(f'''
+        INSERT INTO messages (timestamp, message, group_id, group_name, matched_keywords, status, error)
+        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+    ''', (db_timestamp(datetime.now()), message, group_id, group_name, matched_keywords, status, error))
+
+    conn.commit()
+    conn.close()
+
+
+def get_messages_by_group(group_id, limit=50):
+    """Messages (sent + failed) for a group from the last 24 hours"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
+    cutoff = db_timestamp(datetime.now() - timedelta(hours=MESSAGE_RETENTION_HOURS))
+    cursor.execute(f'''
+        SELECT timestamp, message, matched_keywords, status, error
+        FROM messages
+        WHERE group_id = {placeholder} AND timestamp >= {placeholder}
         ORDER BY id DESC
         LIMIT {placeholder}
-    ''', (group_id, limit))
-    
+    ''', (str(group_id), cutoff, limit))
+
     messages = cursor.fetchall()
     conn.close()
     return messages
 
 def get_all_messages(limit=100):
-    """Get all messages across all groups"""
+    """All messages (sent + failed) across all groups from the last 24 hours"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
+    cutoff = db_timestamp(datetime.now() - timedelta(hours=MESSAGE_RETENTION_HOURS))
     cursor.execute(f'''
-        SELECT timestamp, message, group_name, matched_keywords
+        SELECT timestamp, message, group_name, matched_keywords, status, error
         FROM messages
+        WHERE timestamp >= {placeholder}
         ORDER BY id DESC
         LIMIT {placeholder}
-    ''', (limit,))
-    
+    ''', (cutoff, limit))
+
     messages = cursor.fetchall()
     conn.close()
     return messages
+
 
 def get_stats():
     """Get statistics"""
@@ -1109,8 +1288,12 @@ def get_stats():
     cursor.execute("SELECT COUNT(*) FROM users WHERE status = 'active'")
     active_users = cursor.fetchone()[0]
     
-    cursor.execute('SELECT COUNT(*) FROM messages')
+    placeholder = '?' if DATABASE_TYPE == 'sqlite' else '%s'
+    cutoff = db_timestamp(datetime.now() - timedelta(hours=MESSAGE_RETENTION_HOURS))
+    cursor.execute(f"SELECT COUNT(*) FROM messages WHERE COALESCE(status, 'sent') = 'sent' AND timestamp >= {placeholder}", (cutoff,))
     total_messages = cursor.fetchone()[0]
+    cursor.execute(f"SELECT COUNT(*) FROM messages WHERE status = 'failed' AND timestamp >= {placeholder}", (cutoff,))
+    failed_messages = cursor.fetchone()[0]
     
     enabled_groups = sum(1 for g in GROUPS.values() if g['enabled'])
     
@@ -1120,12 +1303,31 @@ def get_stats():
         'total_users': total_users,
         'active_users': active_users,
         'total_messages': total_messages,
+        'failed_messages': failed_messages,
         'enabled_groups': enabled_groups
     }
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🌐 API ROUTES
 # ═══════════════════════════════════════════════════════════════════════════
+
+@app.errorhandler(Exception)
+def handle_any_error(e):
+    """API and webhook routes always answer in JSON (never an HTML error page), so the dashboard can show the real reason"""
+    from werkzeug.exceptions import HTTPException, InternalServerError
+    is_api = request.path.startswith('/api/') or request.path.startswith('/webhook/')
+
+    if isinstance(e, HTTPException):
+        if is_api:
+            return jsonify({'error': f'{e.code} {e.name}: {e.description}'}), e.code
+        return e
+
+    print(f"❌ Unhandled error on {request.method} {request.path}: {type(e).__name__}: {e}", flush=True)
+    import traceback
+    traceback.print_exc()
+    if is_api:
+        return jsonify({'error': f'{type(e).__name__}: {e}'}), 500
+    return InternalServerError()
 
 @app.route('/')
 def home():
@@ -1146,10 +1348,10 @@ def webhook_router():
                 # Try different possible keys TradingView might use
                 raw_data = data.get('message') or data.get('text') or data.get('alert') or data.get('data') or str(data)
             else:
-                raw_data = request.data.decode('utf-8')
+                raw_data = request.get_data(as_text=True)
         else:
             # Handle plain text format (manual tests)
-            raw_data = request.data.decode('utf-8')
+            raw_data = request.get_data(as_text=True)
         
         if not raw_data:
             print("❌ ERROR: No data received!", flush=True)
@@ -1346,27 +1548,22 @@ def api_stats():
 
 @app.route('/api/messages', methods=['GET'])
 def api_all_messages():
-    """Get all messages"""
+    """Get all messages (sent + failed) from the last 24 hours"""
     limit = request.args.get('limit', 50, type=int)
     messages = get_all_messages(limit)
-    
+
     result = []
-    for timestamp, message, group_name, keywords in messages:
-        # Format timestamp for display
-        if DATABASE_TYPE == 'postgresql':
-            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if isinstance(timestamp, datetime) else str(timestamp)
-        else:
-            timestamp_str = timestamp
-            
+    for timestamp, message, group_name, keywords, status, error in messages:
         result.append({
-            'timestamp': timestamp_str,
+            'timestamp': _fmt_ts(timestamp),
             'message': message,
             'group_name': group_name,
             'keywords': keywords,
-            'status': 'sent'
+            'status': status or 'sent',
+            'error': error
         })
-    
-    return jsonify({'messages': result}), 200
+
+    return jsonify({'messages': result, 'retention_hours': MESSAGE_RETENTION_HOURS}), 200
 
 @app.route('/api/groups', methods=['GET'])
 def api_groups():
@@ -1392,49 +1589,34 @@ def api_rate_limit_status():
 
 @app.route('/api/group/<group_id>/users', methods=['GET'])
 def api_group_users(group_id):
-    """Get users for specific group"""
+    """Users in a group: subscribers (with their plan) + members we have seen join (no plan yet)"""
     try:
         users = get_users_by_group(group_id)
-        
+        members = get_members_by_group(group_id)
+        member_ids = {str(m[0]) for m in members}
+        subscribed_ids = set()
         result = []
         current_time = datetime.now()
-        
+
         for user_id, name, invited, expiry, days, status in users:
             try:
-                joined = check_user_in_group(group_id, user_id)
-                
-                # Format dates for display
-                if DATABASE_TYPE == 'postgresql':
-                    invited_str = invited.strftime('%Y-%m-%d %H:%M:%S') if isinstance(invited, datetime) else str(invited)
-                    expiry_str = expiry.strftime('%Y-%m-%d %H:%M:%S') if isinstance(expiry, datetime) else str(expiry)
-                    
-                    # Parse expiry date
-                    if isinstance(expiry, datetime):
-                        expiry_date = expiry
-                    else:
-                        try:
-                            expiry_date = datetime.strptime(expiry, '%Y-%m-%d %H:%M:%S')
-                        except:
-                            expiry_date = datetime.strptime(str(expiry), '%Y-%m-%d %H:%M:%S.%f')
-                    
-                    # Remove timezone info for comparison
-                    if hasattr(expiry_date, 'tzinfo') and expiry_date.tzinfo is not None:
-                        expiry_date = expiry_date.replace(tzinfo=None)
-                else:
-                    invited_str = invited
-                    expiry_str = expiry
-                    expiry_date = datetime.strptime(expiry, '%Y-%m-%d %H:%M:%S')
-                
+                subscribed_ids.add(str(user_id))
+                joined = check_user_in_group(group_id, user_id) or str(user_id) in member_ids
+
+                invited_str = _fmt_ts(invited)
+                expiry_date = _parse_dt(expiry)
+                expiry_str = _fmt_ts(expiry_date)
+
                 # Calculate days_left dynamically
                 time_diff = expiry_date - current_time
                 days_left_calculated = max(0, time_diff.days)
-                
+
                 # Enhanced logging for users with < 1 day remaining
                 if days_left_calculated < 1 and time_diff.total_seconds() > 0:
                     hours_left = int(time_diff.total_seconds() / 3600)
                     minutes_left = int((time_diff.total_seconds() % 3600) / 60)
                     print(f"   ⏰ User {user_id} ({name}): {hours_left}h {minutes_left}m until expiry | Added: {invited_str} | Expires: {expiry_str}", flush=True)
-                
+
                 result.append({
                     'user_id': user_id,
                     'name': name,
@@ -1442,15 +1624,31 @@ def api_group_users(group_id):
                     'expiry_date': expiry_str,
                     'days_left': days_left_calculated,
                     'status': status,
-                    'joined': joined
+                    'joined': joined,
+                    'has_plan': True
                 })
             except Exception as e:
                 print(f"❌ Error processing user {user_id} in group {group_id}: {e}")
                 # Continue with next user instead of failing entire request
                 continue
-        
-        return jsonify({'users': result}), 200
-    
+
+        # Members who are in the group but have no plan in the database yet
+        for m_user_id, m_name, m_username, m_joined in members:
+            if str(m_user_id) in subscribed_ids:
+                continue
+            result.append({
+                'user_id': m_user_id,
+                'name': m_name or 'Unknown',
+                'invited_date': _fmt_ts(m_joined),
+                'expiry_date': None,
+                'days_left': None,
+                'status': 'no_plan',
+                'joined': True,
+                'has_plan': False
+            })
+
+        return jsonify({'users': result, 'telegram_member_count': get_member_count(group_id)}), 200
+
     except Exception as e:
         print(f"❌ Fatal error in api_group_users for {group_id}: {e}")
         import traceback
@@ -1465,56 +1663,74 @@ def api_group_admins(group_id):
 
 @app.route('/api/group/<group_id>/messages', methods=['GET'])
 def api_group_messages(group_id):
-    """Get messages for specific group"""
+    """Get messages (sent + failed) for a specific group from the last 24 hours"""
     limit = request.args.get('limit', 20, type=int)
     messages = get_messages_by_group(group_id, limit)
-    
+
     result = []
-    for timestamp, message, keywords in messages:
-        # Format timestamp for display
-        if DATABASE_TYPE == 'postgresql':
-            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S') if isinstance(timestamp, datetime) else str(timestamp)
-        else:
-            timestamp_str = timestamp
-            
+    for timestamp, message, keywords, status, error in messages:
         result.append({
-            'timestamp': timestamp_str,
+            'timestamp': _fmt_ts(timestamp),
             'message': message,
-            'keywords': keywords
+            'keywords': keywords,
+            'status': status or 'sent',
+            'error': error
         })
-    
+
     return jsonify({'messages': result}), 200
 
 @app.route('/api/user/add', methods=['POST'])
 def api_add_user():
-    """Add user to group"""
-    data = request.json
-    
-    if data.get('admin_id') != ADMIN_USER_ID:
+    """Add user to group. Normally creates an invite link and DMs it to the user.
+    With invite=false it only starts a plan for someone who is already in the group."""
+    data = request.json or {}
+
+    if str(data.get('admin_id')) != str(ADMIN_USER_ID):
         return jsonify({'error': 'Unauthorized'}), 403
-    
-    group_id = data.get('group_id')
-    user_id = data.get('user_id')
-    days = int(data.get('days', 30))
-    
+
     # Convert to int - Telegram API needs integer, not string
-    group_id = int(group_id)
-    user_id = int(user_id)
-    
+    group_id = int(data.get('group_id'))
+    user_id = int(data.get('user_id'))
+    days = int(data.get('days', 30))
+    send_invite = data.get('invite', True)
+
+    if not send_invite:
+        # Already in the group: use the name we saw when they joined, otherwise ask Telegram, then just start the plan
+        name = None
+        for m_user_id, m_name, m_username, m_joined in get_members_by_group(group_id):
+            if str(m_user_id) == str(user_id):
+                name = m_name
+                break
+
+        if name is None:
+            info = get_group_member(group_id, user_id)
+            if info.get('error'):
+                return jsonify({'error': f"Telegram could not find this user in the group: {info['error']}"}), 400
+            if info.get('status') in ('left', 'kicked'):
+                return jsonify({'error': f"This user is not in the group (status: {info['status']}). Untick 'Already in the group' to send an invite link instead."}), 400
+            user_obj = info.get('user') or {}
+            name = _display_name(user_obj)
+            upsert_member(group_id, user_id, name, user_obj.get('username'))
+
+        add_user(group_id, user_id, days, name=name)
+        return jsonify({'success': True, 'invite_link': None, 'dm_sent': False, 'dm_error': None, 'name': name}), 200
+
     invite_result = create_invite_link(group_id, days)
-    
+
     if not invite_result.get('success'):
         actual_error = invite_result.get('error', 'Unknown error')
         print(f"❌ Invite link failed for group {group_id}: {actual_error}", flush=True)
         return jsonify({'error': f'Telegram says: {actual_error}'}), 500
-    
+
     invite_link = invite_result['link']
     add_user(group_id, user_id, days)
-    
+
     message = f"🎉 You've been invited!\n\nValid for: {days} days\nJoin now: {invite_link}"
-    send_to_telegram(user_id, message)
-    
-    return jsonify({'success': True, 'invite_link': invite_link}), 200
+    dm_sent, dm_error = send_to_telegram(user_id, message)
+    if not dm_sent:
+        print(f"⚠️ Could not DM the invite link to user {user_id}: {dm_error}", flush=True)
+
+    return jsonify({'success': True, 'invite_link': invite_link, 'dm_sent': dm_sent, 'dm_error': dm_error}), 200
 
 @app.route('/api/user/extend', methods=['POST'])
 def api_extend_user():
@@ -1587,6 +1803,7 @@ def api_remove_user():
         # Manual removal: Ban from Telegram AND remove from database
         ban_user_from_group(group_id, user_id)
         remove_user(group_id, user_id)
+        delete_member(group_id, user_id)
         
         return jsonify({'success': True}), 200
     except Exception as e:
@@ -1594,6 +1811,142 @@ def api_remove_user():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+@app.route('/webhook/telegram', methods=['POST'])
+def webhook_telegram():
+    """Receives Telegram updates (joins / leaves / messages) so we know who is in each group"""
+    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != TELEGRAM_WEBHOOK_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    try:
+        update = request.get_json(silent=True) or {}
+        joined = []  # (chat_id, user)
+        left = []
+
+        # Join / leave / promote events (needs the bot to be an admin of the group)
+        cm = update.get('chat_member')
+        if cm:
+            new_member = cm.get('new_chat_member') or {}
+            status = new_member.get('status')
+            is_in = status in ('member', 'administrator', 'creator') or (status == 'restricted' and new_member.get('is_member'))
+            (joined if is_in else left).append((cm['chat']['id'], new_member.get('user') or {}))
+
+        msg = update.get('message')
+        if msg:
+            chat_id = msg['chat']['id']
+            for user in msg.get('new_chat_members', []):
+                joined.append((chat_id, user))
+            if msg.get('left_chat_member'):
+                left.append((chat_id, msg['left_chat_member']))
+            # Anyone who speaks in the group is obviously in it - this also picks up people who were there before tracking started
+            if msg.get('from') and not msg.get('left_chat_member') and not msg.get('new_chat_members'):
+                joined.append((chat_id, msg['from']))
+
+        managed_group_ids = {str(g['group_id']) for g in GROUPS.values()}
+
+        for chat_id, user in joined:
+            if str(chat_id) not in managed_group_ids or user.get('is_bot') or not user.get('id'):
+                continue
+            upsert_member(chat_id, user['id'], _display_name(user), user.get('username'))
+            print(f"👤 Member seen in {chat_id}: {_display_name(user)} ({user['id']})", flush=True)
+
+        for chat_id, user in left:
+            if str(chat_id) not in managed_group_ids or not user.get('id'):
+                continue
+            delete_member(chat_id, user['id'])
+            print(f"🚪 Member left {chat_id}: {_display_name(user)} ({user['id']})", flush=True)
+
+        return jsonify({'ok': True}), 200
+    except Exception as e:
+        # Always answer 200 so Telegram does not keep retrying the same update
+        print(f"❌ Telegram webhook error: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return jsonify({'ok': False, 'error': str(e)}), 200
+
+@app.route('/api/telegram/webhook/set', methods=['POST'])
+def api_set_telegram_webhook():
+    """Register the member-tracking webhook with Telegram (admin only)"""
+    data = request.json or {}
+    if str(data.get('admin_id')) != str(ADMIN_USER_ID):
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    public_url = data.get('url') or PUBLIC_URL or request.host_url
+    ok, detail = set_telegram_webhook(public_url)
+    return jsonify({'success': ok, 'detail': detail}), 200
+
+@app.route('/api/telegram/webhook/info', methods=['GET'])
+def api_telegram_webhook_info():
+    """What Telegram currently has registered as our webhook, and its last error (admin only)"""
+    if request.args.get('admin_id') != str(ADMIN_USER_ID):
+        return jsonify({'error': 'Unauthorized'}), 403
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getWebhookInfo"
+        return jsonify(requests.get(url, timeout=10).json()), 200
+    except Exception as e:
+        return jsonify({'error': f"{type(e).__name__}: {e}"}), 200
+
+def _check_group_access(key, cfg, bot_id):
+    """Can the bot post in this group, and does it have the admin rights the app needs?"""
+    entry = {'key': key, 'name': cfg['name'], 'group_id': cfg['group_id'], 'enabled': cfg['enabled'],
+             'ok': False, 'bot_status': None, 'reason': None, 'warnings': []}
+    base = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+    try:
+        chat = requests.post(f"{base}/getChat", json={'chat_id': int(cfg['group_id'])}, timeout=10).json()
+        if not chat.get('ok'):
+            entry['reason'] = _tg_failure_from_json(chat)
+            if not str(cfg['group_id']).startswith('-100'):
+                entry['warnings'].append("Old-style group ID (no -100 prefix). If the group was upgraded to a supergroup its ID changed - find the new ID and update the config.")
+            return entry
+
+        chat_type = chat['result'].get('type')
+        member = requests.post(f"{base}/getChatMember", json={'chat_id': int(cfg['group_id']), 'user_id': bot_id}, timeout=10).json()
+        if not member.get('ok'):
+            entry['reason'] = _tg_failure_from_json(member)
+            return entry
+
+        info = member['result']
+        status = info.get('status')
+        entry['bot_status'] = status
+
+        if status in ('left', 'kicked'):
+            entry['reason'] = f"Bot is not in this group (status: {status})"
+        elif chat_type == 'channel' and status not in ('administrator', 'creator'):
+            entry['reason'] = "Bot must be an admin to post in a channel"
+        elif status == 'restricted' and not info.get('can_send_messages', True):
+            entry['reason'] = "Bot is restricted from sending messages in this group"
+        else:
+            entry['ok'] = True
+            if status == 'member':
+                entry['warnings'].append("Bot is not an admin: it can post, but cannot remove expired users, create invite links or see joins/leaves")
+            elif status == 'administrator':
+                if not info.get('can_restrict_members'):
+                    entry['warnings'].append("Bot lacks the 'Ban users' permission - removing expired users will fail")
+                if not info.get('can_invite_users'):
+                    entry['warnings'].append("Bot lacks the 'Invite users' permission - invite links will fail")
+        return entry
+    except Exception as e:
+        entry['reason'] = f"{type(e).__name__}: {e}"
+        return entry
+
+@app.route('/api/check-all-groups', methods=['GET'])
+def api_check_all_groups():
+    """Diagnostic that sends NOTHING: checks the bot can see and post in every configured group"""
+    if request.args.get('admin_id') != str(ADMIN_USER_ID):
+        return jsonify({'error': 'Unauthorized'}), 403
+    try:
+        me = requests.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe", timeout=10).json()
+        if not me.get('ok'):
+            return jsonify({'error': 'Bot token problem - ' + _tg_failure_from_json(me)}), 200
+        bot_id = me['result']['id']
+    except Exception as e:
+        return jsonify({'error': f"Could not reach Telegram: {type(e).__name__}: {e}"}), 200
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(_check_group_access, key, cfg, bot_id) for key, cfg in GROUPS.items()]
+        results = [f.result() for f in futures]
+    return jsonify({'groups': results}), 200
 
 @app.route('/api/config', methods=['GET'])
 def api_config():
@@ -1721,6 +2074,13 @@ def health():
 # ═══════════════════════════════════════════════════════════════════════════
 # 🚀 STARTUP
 # ═══════════════════════════════════════════════════════════════════════════
+
+# Register the member-tracking webhook with Telegram when we know our public address
+if PUBLIC_URL:
+    _hook_ok, _hook_detail = set_telegram_webhook(PUBLIC_URL)
+    print(f"{'✅' if _hook_ok else '⚠️'} Telegram member-tracking webhook: {_hook_detail}", flush=True)
+else:
+    print("ℹ️ PUBLIC_URL not set - member tracking webhook not registered (set PUBLIC_URL to your https address, or call POST /api/telegram/webhook/set)", flush=True)
 
 if __name__ == '__main__':
     print("\n" + "═" * 70)
